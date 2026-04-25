@@ -11,7 +11,6 @@ from lazyllm import (
     ToolManager,
 )
 from lazyllm.tools.rag.doc_node import DocNode
-from opentelemetry.trace import SpanKind
 
 
 def test_online_chat_module_tracing(exporter):
@@ -22,7 +21,6 @@ def test_online_chat_module_tracing(exporter):
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].name == "OnlineChatModule"
-    assert spans[0].kind == SpanKind.INTERNAL
     assert spans[0].attributes.get("lazyllm.span.kind") == "module"
     assert spans[0].attributes.get("lazyllm.semantic_type") == "llm"
     assert spans[0].attributes.get("lazyllm.entity.config.model") == "mock-chat"

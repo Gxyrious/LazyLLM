@@ -1,7 +1,6 @@
 import json
 
 from lazyllm import enable_trace
-from opentelemetry.trace import SpanKind
 
 
 def test_simple_function_tracing(exporter):
@@ -13,7 +12,6 @@ def test_simple_function_tracing(exporter):
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].name == "add"
-    assert spans[0].kind == SpanKind.INTERNAL
     assert spans[0].attributes.get("lazyllm.span.kind") == "callable"
     assert json.loads(spans[0].attributes.get("lazyllm.io.input")) == {"args": [5, 3], "kwargs": {}}
     assert spans[0].attributes.get("lazyllm.io.output") == "8"

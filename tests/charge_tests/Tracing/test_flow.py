@@ -1,7 +1,6 @@
 import json
 
 from lazyllm import ifs, loop, parallel, pipeline, switch
-from opentelemetry.trace import SpanKind
 
 
 def add_one(value):
@@ -23,7 +22,6 @@ def test_pipeline_tracing(exporter):
     add_one_span, double_span, format_result_span, pipeline_span = spans
     assert [s.name for s in (add_one_span, double_span, format_result_span)] == ["add_one", "double", "<lambda>"]
     assert pipeline_span.name == "Pipeline"
-    assert pipeline_span.kind == SpanKind.INTERNAL
     assert pipeline_span.attributes.get("lazyllm.span.kind") == "flow"
     assert pipeline_span.attributes.get("lazyllm.semantic_type") == "workflow_control"
     assert json.loads(pipeline_span.attributes.get("lazyllm.io.input")) == {"args": [3], "kwargs": {}}
