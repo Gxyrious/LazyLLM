@@ -1,48 +1,44 @@
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.resources import Resource
 from opentelemetry import trace
 
+import lazyllm
 from lazyllm import set_trace_context, LazyTraceContext
-from lazyllm.tracing.collect.runtime import _runtime
+from lazyllm.tracing.collect import runtime as tracing_runtime
+
+
+class MemoryTracingBackend:
+    name = "memory"
+
+    def __init__(self, exporter):
+        self._exporter = exporter
+
+    def build_exporter(self):
+        return self._exporter
+
+    def map_attributes(self, otel_attrs):
+        return {}
 
 
 @pytest.fixture
-def exporter():
+def exporter(monkeypatch):
     # 重置 OpenTelemetry 全局状态
     trace._TRACER_PROVIDER = None
     trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
 
-    # 重置 runtime 状态
-    _runtime._initialized = False
-    _runtime._tracer = None
-    _runtime._provider = None
-    _runtime._trace_api = None
-
     set_trace_context(LazyTraceContext(trace_id='test-trace', enabled=True))
-
     exporter = InMemorySpanExporter()
-    provider = TracerProvider(resource=Resource.create({'service.name': 'lazyllm'}))
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    monkeypatch.setattr(tracing_runtime, "_runtime", tracing_runtime.TracingRuntime())
+    monkeypatch.setattr(tracing_runtime, "get_tracing_backend", lambda name: MemoryTracingBackend(exporter))
+    monkeypatch.setattr(tracing_runtime.opentelemetry.sdk.trace.export, "BatchSpanProcessor", SimpleSpanProcessor)
 
-    _runtime._provider = provider
-    _runtime._trace_api = trace
-    _runtime._tracer = trace.get_tracer('lazyllm.tracing')
-    _runtime._initialized = True
+    with lazyllm.config.temp("trace_backend", "memory"):
+        with lazyllm.config.temp("trace_enabled", True):
+            with lazyllm.config.temp("trace_content_enabled", True):
+                assert tracing_runtime.tracing_available()
+                yield exporter
 
-    yield exporter
-
-    exporter.clear()
+    tracing_runtime._runtime.shutdown()
     trace._TRACER_PROVIDER = None
     trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
-    _runtime._initialized = False
-    _runtime._tracer = None
-    _runtime._provider = None
-    _runtime._trace_api = None
-
-
-def find_spans_by_name(spans, name):
-    return [s for s in spans if s.name == name]
