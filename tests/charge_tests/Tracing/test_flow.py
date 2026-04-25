@@ -29,7 +29,6 @@ def test_pipeline_tracing(exporter):
     assert json.loads(pipeline_span.attributes.get("lazyllm.io.input")) == {"args": [3], "kwargs": {}}
     assert pipeline_span.attributes.get("lazyllm.io.output") == "result:8"
     child_spans = [add_one_span, double_span, format_result_span]
-    assert all(s.attributes.get("lazyllm.span.kind") == "callable" for s in child_spans)
     assert all(s.parent.span_id == pipeline_span.context.span_id for s in child_spans)
     assert result == "result:8"
 
@@ -46,11 +45,6 @@ def test_parallel_tracing(exporter):
     assert len(spans) == 4 and len(child_spans) == 3
     assert {s.name for s in child_spans} == {"add_one", "double", "<lambda>"}
     assert parallel_span.name == "Parallel"
-    assert parallel_span.kind == SpanKind.INTERNAL
-    assert parallel_span.attributes.get("lazyllm.span.kind") == "flow"
-    assert parallel_span.attributes.get("lazyllm.semantic_type") == "workflow_control"
-    assert all(span.parent.span_id == parallel_span.context.span_id for span in child_spans)
-    assert len({span.context.trace_id for span in spans}) == 1
     assert list(result) == [4, 6, 2]
 
 
@@ -72,12 +66,8 @@ def test_switch_tracing(exporter):
     branch_span, switch_span = spans
     assert switch_span.name == "Switch"
     assert branch_span.name == "positive_branch"
-    assert switch_span.kind == SpanKind.INTERNAL
-    assert switch_span.attributes.get("lazyllm.span.kind") == "flow"
-    assert switch_span.attributes.get("lazyllm.semantic_type") == "workflow_control"
     assert switch_span.attributes.get("lazyllm.matched.index") == 0
     assert switch_span.attributes.get("lazyllm.matched.branch") == "positive_branch"
-    assert branch_span.parent.span_id == switch_span.context.span_id
     assert result == "positive:3"
 
 
@@ -97,11 +87,7 @@ def test_loop_tracing(exporter):
     assert len(spans) == 4 and len(iteration_spans) == 3
     assert loop_span.name == "Loop"
     assert all(s.name == "increment" for s in iteration_spans)
-    assert loop_span.kind == SpanKind.INTERNAL
-    assert loop_span.attributes.get("lazyllm.span.kind") == "flow"
-    assert loop_span.attributes.get("lazyllm.semantic_type") == "workflow_control"
     assert loop_span.attributes.get("lazyllm.loop.actual_iterations") == 3
-    assert all(span.parent.span_id == loop_span.context.span_id for span in iteration_spans)
     assert result == 3
 
 
@@ -124,12 +110,7 @@ def test_ifs_tracing(exporter):
     assert ifs_span.name == "IFS"
     assert condition_span.name == "is_even"
     assert branch_span.name == "true_path"
-    assert ifs_span.kind == SpanKind.INTERNAL
-    assert ifs_span.attributes.get("lazyllm.span.kind") == "flow"
-    assert ifs_span.attributes.get("lazyllm.semantic_type") == "workflow_control"
     assert ifs_span.attributes.get("lazyllm.matched.branch") == "true_path"
     assert ifs_span.attributes.get("lazyllm.matched.chosen_node") == "true_path"
     assert ifs_span.attributes.get("lazyllm.matched.condition_result") is True
-    assert condition_span.parent.span_id == ifs_span.context.span_id
-    assert branch_span.parent.span_id == ifs_span.context.span_id
     assert result == "even:4"

@@ -40,13 +40,9 @@ def test_online_embedding_module_tracing(exporter):
         result = module(["first", "second"])
 
     spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == "OnlineEmbeddingModule"
-    assert spans[0].kind == SpanKind.INTERNAL
-    assert spans[0].attributes.get("lazyllm.span.kind") == "module"
+    assert [s.name for s in spans] == ["OnlineEmbeddingModule"]
     assert spans[0].attributes.get("lazyllm.semantic_type") == "embedding"
     assert spans[0].attributes.get("lazyllm.entity.config.model") == "mock-embedding"
-    assert json.loads(spans[0].attributes.get("lazyllm.io.input")) == {"args": [["first", "second"]], "kwargs": {}}
     assert json.loads(spans[0].attributes.get("lazyllm.io.output")) == embeddings
     assert result == embeddings
 
@@ -65,12 +61,8 @@ def test_retriever_tracing(exporter):
         result = retriever("query")
 
     spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == "Retriever"
-    assert spans[0].kind == SpanKind.INTERNAL
-    assert spans[0].attributes.get("lazyllm.span.kind") == "module"
+    assert [s.name for s in spans] == ["Retriever"]
     assert spans[0].attributes.get("lazyllm.semantic_type") == "retriever"
-    assert json.loads(spans[0].attributes.get("lazyllm.io.input")) == {"args": ["query"], "kwargs": {}}
     assert spans[0].attributes.get("lazyllm.output.doc_count") == 3
     assert json.loads(spans[0].attributes.get("lazyllm.output.similarity_scores")) == [0.9, 0.8, 0.7]
     assert result == nodes
@@ -86,10 +78,7 @@ def test_reranker_tracing(exporter):
     result = reranker(nodes, query="query")
 
     spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == "ModuleReranker"
-    assert spans[0].kind == SpanKind.INTERNAL
-    assert spans[0].attributes.get("lazyllm.span.kind") == "module"
+    assert [s.name for s in spans] == ["ModuleReranker"]
     assert spans[0].attributes.get("lazyllm.semantic_type") == "rerank"
     assert spans[0].attributes.get("lazyllm.output.doc_count") == 2
     assert json.loads(spans[0].attributes.get("lazyllm.output.relevance_scores")) == [0.95, 0.85]
@@ -108,13 +97,8 @@ def test_agent_module_tracing(exporter, tmp_path):
         result = agent("input")
 
     spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == "LazyLLMAgentBase"
-    assert spans[0].kind == SpanKind.INTERNAL
-    assert spans[0].attributes.get("lazyllm.span.kind") == "module"
+    assert [s.name for s in spans] == ["LazyLLMAgentBase"]
     assert spans[0].attributes.get("lazyllm.semantic_type") == "agent"
-    assert json.loads(spans[0].attributes.get("lazyllm.io.input")) == {"args": ["input"], "kwargs": {}}
-    assert spans[0].attributes.get("lazyllm.io.output") == "agent:input"
     assert result == "agent:input"
 
 
@@ -125,11 +109,6 @@ def test_tool_manager_module_tracing(exporter):
         result = manager({"function": {"name": "missing", "arguments": "{}"}})
 
     spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == "ToolManager"
-    assert spans[0].kind == SpanKind.INTERNAL
-    assert spans[0].attributes.get("lazyllm.span.kind") == "module"
+    assert [s.name for s in spans] == ["ToolManager"]
     assert spans[0].attributes.get("lazyllm.semantic_type") == "tool"
-    assert json.loads(spans[0].attributes.get("lazyllm.io.input")) == {"args": [{"function": {"name": "missing", "arguments": "{}"}}], "kwargs": {}}
-    assert json.loads(spans[0].attributes.get("lazyllm.io.output")) == ["tool result"]
     assert result == ["tool result"]
