@@ -1,0 +1,679 @@
+.or-scene {
+  width: 100%;
+  height: 100%;
+  padding: 68px 86px;
+  color: var(--text);
+  background:
+    linear-gradient(90deg, var(--surface) 0 49.95%, var(--rule) 49.95% 50.05%, var(--surface) 50.05% 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow: hidden;
+  letter-spacing: 0;
+}
+
+.or-scene *,
+.or-scene *::before,
+.or-scene *::after {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+.or-scene code {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.or-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 540px;
+  gap: 54px;
+  align-items: end;
+  padding-bottom: 22px;
+  border-bottom: var(--rule-w) var(--rule-style) var(--rule);
+}
+
+.or-kicker {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  color: var(--text-mute);
+  margin-bottom: 12px;
+}
+
+.or-title h2 {
+  margin: 0;
+  max-width: 1120px;
+  font-family: var(--font-display-cn);
+  font-size: 56px;
+  line-height: 1.08;
+  font-weight: 820;
+  color: var(--text);
+}
+
+.or-title aside {
+  min-height: 116px;
+  display: grid;
+  align-content: end;
+  gap: 16px;
+}
+
+.or-title p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 23px;
+  line-height: 1.38;
+  color: var(--text-2);
+}
+
+.or-title-meta {
+  justify-self: start;
+  padding: 12px 14px;
+  border-top: var(--rule-w) var(--rule-style) var(--accent);
+  border-bottom: var(--rule-w) var(--rule-style) var(--accent);
+  background: var(--surface-2);
+}
+
+.or-title-meta code {
+  font-size: 16px;
+}
+
+.or-anchor-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.or-anchor {
+  min-height: 0;
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: 0.6fr 1fr;
+  grid-template-rows: auto 1fr;
+  column-gap: 16px;
+  row-gap: 8px;
+  background: var(--surface-2);
+  box-shadow: var(--card-shadow);
+  opacity: 0;
+  transform: translateY(18px);
+  animation: or-rise var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(210ms + var(--i) * 100ms);
+}
+
+.or-anchor span {
+  font-family: var(--font-display-cn);
+  font-size: 21px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.or-anchor code {
+  justify-self: end;
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.or-anchor p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.or-code-stack {
+  padding: 18px 22px;
+  display: grid;
+  gap: 0;
+  border: var(--rule-w) var(--rule-style) var(--rule);
+  background: var(--surface-2);
+  box-shadow: var(--card-shadow);
+}
+
+.or-code-row {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 0.34fr 1fr;
+  gap: 18px;
+  align-items: center;
+  border-bottom: var(--rule-w) var(--rule-style) var(--rule);
+  opacity: 0;
+  transform: translateX(20px);
+  animation: or-slide var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(150ms + var(--i) * 90ms);
+}
+
+.or-code-row:last-child {
+  border-bottom-width: 0;
+}
+
+.or-code-row span {
+  font-family: var(--font-display-cn);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.or-code-row code {
+  font-size: 16px;
+  line-height: 1.28;
+}
+
+.or-state-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 426px;
+  gap: 24px;
+}
+
+.or-state-visual,
+.or-start-visual,
+.or-finish-visual,
+.or-concurrency-card,
+.or-lazytrace-visual {
+  min-height: 0;
+  background: var(--surface-2);
+  border: var(--rule-w) var(--rule-style) var(--rule);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.or-state-svg,
+.or-start-svg,
+.or-finish-svg,
+.or-concurrency-svg,
+.or-lazytrace-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.or-state-svg {
+  min-height: 650px;
+}
+
+.or-state-column {
+  opacity: 0;
+  transform: translateY(28px);
+  animation: or-state-split var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(140ms + var(--i) * 170ms);
+}
+
+.or-state-column rect,
+.or-start-node rect,
+.or-finish-stage rect,
+.or-worker-box,
+.or-lane-node rect,
+.or-process-rebuild rect,
+.or-span-node rect,
+.or-trace-ledger,
+.or-ledger-chip rect,
+.or-leak-stop rect {
+  fill: var(--surface);
+  stroke: var(--text);
+  stroke-width: 1.4;
+}
+
+.or-node-decision rect,
+.or-node-rebuild rect,
+.or-finish-stage:nth-of-type(4) rect,
+.or-process-rebuild rect,
+.or-trace-ledger {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+
+.or-svg-title,
+.or-svg-copy,
+.or-flow-label {
+  font-family: var(--font-display-cn);
+  fill: var(--text);
+}
+
+.or-svg-title {
+  font-size: 24px;
+  font-weight: 820;
+}
+
+.or-svg-code,
+.or-svg-chip {
+  font-family: var(--font-mono);
+  fill: var(--accent);
+  font-size: 16px;
+}
+
+.or-svg-copy {
+  font-size: 17px;
+  fill: var(--text-2);
+}
+
+.or-svg-rule {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.or-chip-node {
+  opacity: 0;
+  transform: translateX(-16px);
+  animation: or-slide var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(420ms + var(--i) * 85ms);
+}
+
+.or-chip-node rect {
+  fill: var(--surface-2);
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.or-state-bus,
+.or-start-path,
+.or-finish-rail,
+.or-finish-exception,
+.or-thread-line,
+.or-process-line,
+.or-tree-line,
+.or-aggregate-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-dasharray: 1400;
+  stroke-dashoffset: 1400;
+  animation: or-draw var(--dur-cinematic) var(--ease-expo) forwards;
+}
+
+.or-bus-context,
+.or-process-line,
+.or-tree-line {
+  stroke: var(--rule);
+}
+
+.or-bus-stack,
+.or-finish-exception,
+.or-aggregate-b,
+.or-aggregate-c {
+  stroke: var(--text-mute);
+}
+
+.or-flow-label {
+  font-size: 17px;
+  fill: var(--text-mute);
+  opacity: 0;
+  animation: or-fade var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: 820ms;
+}
+
+.or-start-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 496px;
+  gap: 22px;
+}
+
+.or-start-side {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+}
+
+.or-start-side .or-anchor-grid {
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.or-start-node {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.94);
+  animation: or-pop var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(240ms + var(--i) * 110ms);
+}
+
+.or-start-node .or-svg-title {
+  font-size: 21px;
+}
+
+.or-start-node .or-svg-code {
+  font-size: 14px;
+}
+
+.or-path-b,
+.or-path-d,
+.or-path-i {
+  stroke: var(--accent);
+}
+
+.or-path-c,
+.or-path-e {
+  stroke: var(--text-mute);
+}
+
+.or-finish-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 300px;
+  gap: 20px;
+}
+
+.or-finish-bottom {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 0.98fr 1.02fr;
+  gap: 20px;
+}
+
+.or-finish-bottom .or-anchor-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.or-finish-stage {
+  opacity: 0;
+  transform: translateY(26px);
+  animation: or-rise-svg var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(200ms + var(--i) * 130ms);
+}
+
+.or-finish-stage circle {
+  fill: var(--surface-3);
+  stroke: var(--accent);
+  stroke-width: 3;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: or-pulse-dot var(--dur-cinematic) var(--ease-quart) forwards;
+  animation-delay: calc(620ms + var(--i) * 120ms);
+}
+
+.or-finish-rail {
+  stroke: var(--rule);
+}
+
+.or-leak-stop {
+  opacity: 0;
+  animation: or-fade var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: 1100ms;
+}
+
+.or-enable-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 432px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 184px;
+  gap: 18px;
+}
+
+.or-enable-stack {
+  display: grid;
+  grid-template-rows: repeat(5, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.or-stack-frame {
+  padding: 16px 18px;
+  background: var(--surface-2);
+  box-shadow: var(--card-shadow);
+  display: grid;
+  grid-template-columns: 0.44fr 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 8px 14px;
+  opacity: 0;
+  transform: translateX(-22px);
+  animation: or-slide var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(130ms + var(--i) * 95ms);
+}
+
+.or-stack-frame span {
+  font-family: var(--font-display-cn);
+  font-size: 18px;
+  font-weight: 820;
+  color: var(--text);
+}
+
+.or-stack-frame code {
+  justify-self: end;
+  font-size: 14px;
+  line-height: 1.24;
+  text-align: right;
+}
+
+.or-stack-frame p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.28;
+  color: var(--text-2);
+}
+
+.or-concurrency-card {
+  min-height: 0;
+}
+
+.or-enable-layout > .or-anchor-grid {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.or-enable-layout > .or-anchor-grid .or-anchor {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto 1fr;
+  padding: 16px;
+}
+
+.or-enable-layout > .or-anchor-grid .or-anchor code {
+  justify-self: start;
+  text-align: left;
+}
+
+.or-worker-box,
+.or-lane-node,
+.or-process-rebuild {
+  opacity: 0;
+  transform: translateY(22px);
+  animation: or-rise-svg var(--dur-slow) var(--ease-quart) forwards;
+}
+
+.or-worker-box {
+  animation-delay: 140ms;
+}
+
+.or-lane-node {
+  animation-delay: calc(300ms + var(--i) * 160ms);
+}
+
+.or-process-rebuild {
+  animation-delay: 880ms;
+}
+
+.or-thread-line {
+  stroke: var(--accent);
+}
+
+.or-process-line {
+  animation-delay: 260ms;
+}
+
+.or-thread-node rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+
+.or-lazytrace-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 164px;
+  gap: 16px;
+}
+
+.or-lazytrace-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  gap: 16px;
+  min-height: 0;
+}
+
+.or-lazytrace-bottom .or-anchor-grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.or-lazytrace-bottom .or-anchor {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto 1fr;
+  padding: 10px 12px;
+  row-gap: 4px;
+}
+
+.or-lazytrace-bottom .or-anchor code {
+  justify-self: start;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.or-lazytrace-bottom .or-anchor span {
+  font-size: 18px;
+}
+
+.or-lazytrace-bottom .or-anchor p {
+  font-size: 13px;
+  line-height: 1.18;
+}
+
+.or-span-node,
+.or-ledger-chip,
+.or-trace-ledger {
+  opacity: 0;
+  transform: translateY(22px);
+  animation: or-rise-svg var(--dur-slow) var(--ease-quart) forwards;
+}
+
+.or-span-node {
+  animation-delay: calc(180ms + var(--i) * 140ms);
+}
+
+.or-ledger-chip {
+  animation-delay: calc(560ms + var(--i) * 90ms);
+}
+
+.or-trace-ledger {
+  animation-delay: 700ms;
+}
+
+.or-span-node:first-of-type rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+
+.or-responsibility-strip {
+  display: grid;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.or-responsibility {
+  padding: 9px 12px;
+  background: var(--surface-2);
+  box-shadow: var(--card-shadow);
+  display: grid;
+  grid-template-columns: 0.62fr 1fr;
+  grid-template-rows: auto 7px;
+  gap: 6px 10px;
+  opacity: 0;
+  transform: translateX(22px);
+  animation: or-slide var(--dur-slow) var(--ease-quart) forwards;
+  animation-delay: calc(260ms + var(--i) * 120ms);
+}
+
+.or-responsibility strong {
+  font-family: var(--font-display-en);
+  font-size: 18px;
+  color: var(--text);
+}
+
+.or-responsibility p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.15;
+  color: var(--text-2);
+}
+
+.or-responsibility i {
+  grid-column: 1 / -1;
+  display: block;
+  width: var(--w);
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: or-bar var(--dur-cinematic) var(--ease-expo) forwards;
+  animation-delay: calc(560ms + var(--i) * 130ms);
+}
+
+@keyframes or-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes or-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes or-rise-svg {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes or-slide {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes or-pop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes or-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes or-state-split {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes or-pulse-dot {
+  70% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes or-bar {
+  to {
+    transform: scaleX(1);
+  }
+}

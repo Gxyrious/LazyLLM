@@ -1,557 +1,369 @@
-LazyLLM Tracing 解决的，不是多打一层日志。
+LazyLLM Tracing 解决的不是“多打日志”。
 
-它给每次请求，生成一棵结构化 Trace 树。
-
----
-
-这棵树会绑定 trace_id。
-
-也会带上 session_id 和 request_tags。
-
-这样跨组件行为能归到同一次请求。
+它把一次真实请求变成 Trace 树：入口是 root span，Retriever、LLM、Tool 都挂成子节点，最后由 exporter 写到 Langfuse 或本地后端。
 
 ---
 
-Trace 里记录节点拓扑。
+这棵树先绑定请求上下文。
 
-请求经过哪些节点。
+`trace_id` 串起整条链，`session_id`、`user_id` 和 `request_tags` 用来聚合和筛选。
 
-节点之间谁调用谁。
-
-这些都会留下来。
+这些字段会沿着组件调用传播，所以跨组件行为不会散成几段孤立日志。
 
 ---
 
-每个节点会记录 Input、Output、状态和异常。
+Trace 必须留下拓扑。
 
-但完整 payload 要不要保存。
+每个节点有自己的 `span_id`，父节点写在 `parent_span_id`。
 
-由运行时配置决定。
-
----
-
-节点还会补语义。
-
-比如 llm、retriever、rerank、tool、agent。
-
-这让上层分析知道节点在业务里干什么。
+Pipeline 可以 fan-out 到 retriever、formatter、llm，retriever 内部还能再嵌 TxtReader。
 
 ---
 
-配置和资源也会进来。
+节点还会保存执行快照。
 
-模型名、Top-K、重排分数、控制流结果。
+核心字段是 input、output、status、exception 和 duration。
 
-还有耗时、prompt_tokens、completion_tokens。
-
----
-
-RAG 排障时，这些信息很关键。
-
-链路是 Retriever、Reranker、LLM。
-
-答案错了，要先拆链路。
+但完整 payload 受配置控制；`debug_capture_payload=False` 时，结构还在，内容会被裁掉或脱敏。
 
 ---
 
-知识没召回，是 retriever 的问题。
+节点要补语义。
 
-上下文有了还答错，再看 LLM。
+同样都是 span，`llm`、`retriever`、`rerank`、`tool`、`agent` 的分析方式完全不同。
 
-中间分数异常，再看 reranker。
-
----
-
-Agent 也是同一套思路。
-
-看模型输出。
-
-看工具调用。
-
-看状态回填。
-
-再看是不是进了无效循环。
+有了 `semantic_type`，上层系统才知道该读模型字段、召回分数，还是工具调用。
 
 ---
 
-性能问题看 Waterfall。
+配置和资源也要进 Trace。
 
-总响应慢，会拆成每个节点的耗时。
+LLM 带 model、prompt、temperature、token usage。
 
-慢点可能是推理，也可能是检索或控制流。
+Retriever 带 similarity、Top-K、召回分数。
 
----
+Flow 带分支命中和控制流结果。
 
-线上分析靠标签。
-
-session、user、request_tags 用来聚合请求。
-
-Prompt 改动、模型切换、流程改动，都能靠 Trace 对比。
+这样 Trace 才是可分析账本。
 
 ---
 
-Logging 看局部事件。
+RAG 排障先拆链路，不要先猜模型。
 
-Metrics 看聚合趋势。
+Retriever 看 query、Top-K、similarity、召回 chunk 和 source_id。
 
-Tracing 看一次请求的完整执行视图。
+Reranker 看候选是否被重新排坏。
 
----
+LLM 看 prompt、context_str、answer 和 token usage。
 
-接入示例用 Langfuse。
-
-你需要一个项目。
-
-再拿到 LANGFUSE_BASE_URL、PUBLIC_KEY、SECRET_KEY。
+一条 Trace 把这三段的输入、输出、耗时放在同一棵树里。
 
 ---
 
-Cloud 地址按区域选。
+错误归因要看证据路径。
 
-EU 常用 cloud.langfuse.com。
+没召回正确知识，先查索引、切块和检索参数。
 
-US 用 us.cloud.langfuse.com。
+知识进了上下文还答错，再查 prompt 和模型输出。
 
----
+候选有了但顺序异常，再查 reranker score。
 
-本地依赖包括 lazyllm、langfuse。
-
-还有 opentelemetry-api、sdk。
-
-以及 OTLP HTTP exporter。
+这比只看最终 answer 更接近真实问题。
 
 ---
 
-环境变量只保留关键三类。
+Agent 排障看决策链。
 
-LAZYLLM_TRACE_ENABLED 打开。
+Trace 里要同时看模型输出、tool_call_id、工具参数、工具返回和状态回填。
 
-LAZYLLM_TRACE_BACKEND 设成 langfuse。
-
-LAZYLLM_TRACE_CONTENT_ENABLED 控制内容采集。
+如果 `loop_count` 不断上涨，就检查上一轮 observation 有没有写回，以及下一步 action 为什么又选了同一个工具。
 
 ---
 
-如果代码已经用 LazyLLM 编排。
+性能和线上回归也靠 Trace。
 
-配置好后直接运行。
+Waterfall 把总耗时拆成节点 duration：LLM 慢看推理和 token，Retriever 慢看文档读取或向量库，控制流慢看分支重复。
 
-默认观测会自动生成 Trace。
-
----
-
-文档里的 RAG 骨架是 Document、Retriever、formatter、LLM、Pipeline。
-
-这个结构跑起来后，Langfuse 里会出现 Pipeline Trace。
+再用 `session_id`、`user_id`、`request_tags`、Prompt 版本和模型版本聚合，才能比较一批请求的共同退化。
 
 ---
 
-里面能看到 Pipeline、retriever、llm、lambda、TxtReader。
+接入 Langfuse 先准备后端凭证。
 
-llm 的 observation type 是 GENERATION。
+`LANGFUSE_BASE_URL` 是写入地址，Cloud 常见是 EU 的 `https://cloud.langfuse.com` 或 US 的 `https://us.cloud.langfuse.com`。
 
-retriever 是 RETRIEVER。
+`LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY` 负责认证。
 
----
-
-set_trace_context 是请求级上下文 API。
-
-它在真正执行工作流前写入信息。
-
-自己不会创建 Trace。
+这些变量只应该服务观测后端，不应该写进业务逻辑。
 
 ---
 
-它常用来写 session_id、user_id、request_tags。
+依赖和运行开关分开看。
 
-也可以写 trace_id、parent_span_id。
+`lazyllm` 提供编排和内置 hook，`langfuse` 提供后端集成，OpenTelemetry API、SDK 和 OTLP HTTP exporter 负责标准 span 与导出。
 
-还可以写 sampled、debug_capture_payload、module_trace。
-
----
-
-要记住一个规则。
-
-set_trace_context 后面必须真的调用 LazyLLM 工作流。
-
-否则不会产生新 Trace。
+运行时再用 `LAZYLLM_TRACE_ENABLED`、`LAZYLLM_TRACE_BACKEND`、`LAZYLLM_TRACE_CONTENT_ENABLED` 控制是否追踪、写到哪里、是否保存内容。
 
 ---
 
-enable_trace 管入口边界。
+如果业务已经用 LazyLLM 编排，默认接入通常不改调用代码。
 
-wrapper 适合某一次调用。
+Flow 和 Module 的执行路径里已经有 hook 入口。
 
-decorator 适合服务入口或长期复用函数。
+你配置好后端和开关，继续运行原来的 pipeline，框架就会自动生成 Trace。
 
----
-
-包装 Flow 或 Module 时。
-
-enable_trace 主要准备上下文。
-
-内部节点仍然走默认 hook。
+观测逻辑留在执行边界，而不是散落在每个业务函数里。
 
 ---
 
-包装普通 Python callable 时。
+RAG 示例的结构是 `Document -> Retriever -> formatter -> LLM -> Pipeline`。
 
-如果没有活动父节点。
+`Document` 建知识源，`Retriever` 用 `bm25_chinese` 和 `topk=3` 召回。
 
-它会按需要补一个入口 span。
+formatter 把 nodes 合成 `context_str`，LLM 再基于上下文回答。
+
+这个业务结构会直接映射成 Trace 里的节点拓扑。
+
+---
+
+跑起来后，Langfuse 里会看到 Pipeline Trace。
+
+关键节点包括 `Pipeline`、`retriever`、`llm`、`<lambda>` 和 `TxtReader`。
+
+`llm` 的 observation type 是 `GENERATION`，`retriever` 是 `RETRIEVER`。
+
+这些类型来自 LazyLLM 的语义补全，不是页面临时猜出来的。
+
+---
+
+`set_trace_context` 只写请求上下文，不创建 Trace。
+
+它适合在真正执行工作流前写入 `session_id`、`user_id`、`request_tags`，也可以写 `trace_id` 和 `parent_span_id` 来续接链路。
+
+只调用它不会出现新节点；后面必须真的执行 `rag_ppl(question)`，hook 才会读到这些字段。
+
+---
+
+请求级上下文也能控制采集。
+
+`sampled` 决定是否上报，`debug_capture_payload` 决定本次是否保留 input/output，`module_trace` 可以按模块名关闭采集。
+
+比如本次把 llm 关掉，或者只在 debug 请求里打开完整 payload，都不需要改全局服务。
+
+---
+
+`enable_trace` 管入口边界。
+
+wrapper 适合包住某一次调用，decorator 适合服务入口或长期复用函数。
+
+包装 Flow 或 Module 时，内部节点仍然走默认 hook。
+
+包装普通 Python callable 时，如果没有活动父节点，它会按需要补一个入口 span。
 
 ---
 
 Tracing 专用参数会先被消费。
 
-比如 session_id、request_tags。
+`session_id`、`request_tags`、`trace_id` 会进入 LazyTraceContext，不会继续传给业务函数。
 
-它们不会继续传给业务函数。
+采集配置也分两层：进程默认值来自环境变量，单次覆盖来自 LazyTraceContext。
 
----
-
-采集配置分两层。
-
-进程默认看环境变量。
-
-单次覆盖看 LazyTraceContext。
+这样线上默认策略和单次 debug 可以共存。
 
 ---
 
-全局开关是三个。
+采集开关要按层理解。
 
-TRACE_ENABLED 控制是否默认开启。
+`enabled` 控制这次是否建节点。
 
-TRACE_CONTENT_ENABLED 控制 payload。
+`sampled` 控制建了以后是否上报。
 
-TRACE_BACKEND 控制写入后端。
+`debug_capture_payload=False` 只影响内容留存，不会让 Trace 消失。
 
----
-
-请求级字段更细。
-
-enabled 控制本次是否开启。
-
-sampled 控制是否上报。
-
-debug_capture_payload 控制内容。
-
-module_trace 控制模块。
+`module_trace={"by_name":{"llm":False}}` 则会让本次请求里的 llm 节点不记录。
 
 ---
 
-debug_capture_payload 设成 False。
-
-Trace 仍然生成。
-
-只是 input 和 output 不完整保存。
-
----
-
-module_trace 可以按模块关采集。
-
-比如 by_name 里把 llm 设成 False。
-
-这次请求里 llm 节点就不记录。
-
----
-
-归属字段用于分析。
-
-session_id 聚合同一会话。
-
-user_id 定位用户。
-
-request_tags 做筛选和对比。
-
----
-
-trace_id 和 parent_span_id 用来续接链路。
-
-跨系统调用时，它们决定新 span 接到哪里。
-
----
-
-内部架构可以分成四层。
+内部架构按数据流看最清楚。
 
 运行层执行 Flow、Module、callable。
 
-埋点适配层决定怎么接入和补语义。
+埋点适配层负责 hook 接入、采集策略和语义补全。
+
+OpenTelemetry 层管理 span 生命周期和上下文传播。
+
+后端层把标准 span 写到 Langfuse 或 JSONL，消费适配层再把 Trace 读回评估和自进化系统。
 
 ---
 
-OTEL 标准层管理 span 生命周期。
+核心对象分三类。
 
-也管理上下文传播、父子关系和请求聚合。
+`LazyTraceContext` 很轻，只放 `trace_id`、`parent_span_id`、session、user、tags，以及 enabled、sampled、payload、module 规则。
 
----
-
-Backend 层构造 exporter。
-
-把 OTel spans 写入 Langfuse 或本地 JSONL。
+它要能跨线程和进程传播，所以不能依赖 active span 对象。
 
 ---
 
-分析适配层从后端读 Trace。
+`LazySpan` 是单节点 observation 快照。
 
-再转换给评估系统和自进化系统消费。
+它保存 name、span_kind、semantic_type、input、output、status、error、config、usage。
 
----
-
-核心对象有三个。
-
-LazyTraceContext。
-
-LazySpan。
-
-LazyTrace。
+页面上的节点详情，大部分都来自这个对象，再映射成后端属性。
 
 ---
 
-LazyTraceContext 很轻。
+`LazyTrace` 是请求级账本。
 
-保存 trace_id、parent_span_id、session、user、tags。
+它记录 root_span_id、开始结束时间、整体状态和 metadata。
 
-也保存采集控制字段。
+首个活动 span 创建它，后续节点登记进去，结束时统一收口。
 
----
-
-LazySpan 是单个 observation 快照。
-
-保存 name、span_kind、semantic_type。
-
-也保存 input、output、status、error、config、usage。
+上下文负责传播，Span 负责事实，Trace 负责全局视图。
 
 ---
 
-LazyTrace 是请求级聚合对象。
+默认观测能自动挂上去，是因为 LazyLLM 已经有统一执行链。
 
-保存 root_span_id、开始结束时间、整体状态和 metadata。
+Flow 初始化时会调用 `register_hooks(self, resolve_builtin_hooks(self))`。
 
----
-
-默认接入依赖已有执行链。
-
-Flow 初始化时，会 register_hooks。
-
-hook 列表来自 resolve_builtin_hooks。
+`resolve_builtin_hooks` 根据对象和运行配置返回内置 hook 列表，Tracing 只是其中一种 provider 能力。
 
 ---
 
-Flow 调用入口走 execution_with_hooks。
+Flow 和 Module 的调用边界会统一进 hook。
 
-同时用 stack_enter 让运行时知道调用层级。
+Flow 执行走 `execution_with_hooks`，同时 `globals.stack_enter(...)` 维护调用层级。
 
----
+Module 的 `__call__` 也会把 `_call_impl` 包进 `execution_with_hooks(...)`。
 
-Module 也是同一套。
-
-__call__ 会把 _call_impl 包进 execution_with_hooks。
+所以父子关系来自框架调用栈，不靠业务代码手写。
 
 ---
 
-内置 hook provider 集中判断对象要不要进观测。
+provider 会先判断要不要挂 Tracing。
 
-trace_enabled 关了，就不挂。
+全局 `trace_enabled` 关了，不返回 hook。
 
-模块规则关了，也不挂。
+模块规则命中关闭，也不返回。
 
----
-
-通过判断后。
-
-provider 返回 LazyTracingHook。
-
-后续调用就能进入 Tracing 生命周期。
+通过判断后才返回 `[LazyTracingHook]`，后续调用才会进入 pre、post、error、finalize 生命周期。
 
 ---
 
-一个节点的生命周期很固定。
+LazyTracingHook 的生命周期很固定。
 
-pre_hook 建 span。
+`pre_hook` 读 LazyTraceContext，检查 `enabled`、`sampled` 和模块规则，能记录才创建 span。
 
-post_hook 写结果。
+`post_hook` 写 output、usage、耗时和模型信息。
 
-on_error 写异常。
+`on_error` 记录异常。
 
-finalize 关闭 span。
-
----
-
-pre_hook 会读 globals 里的 trace 配置。
-
-enabled 是 False，直接跳过。
-
-sampled 是 False，也跳过。
+`finalize` 关闭上下文。
 
 ---
 
-post_hook 会回写 output。
+Retriever 和 Reranker 要补后处理数据。
 
-也会写 usage 和结构化属性。
+有些候选节点、source id、召回分数和重排分数不是调用开始时就有。
 
-这些属性后面会映射到后端。
+所以 hook 会先安装 probe，等 nodes 或 score 出来后再补采。
 
----
-
-retriever 和 reranker 有些结果来得晚。
-
-所以 hook 会提前安装 probe。
-
-在后处理阶段补采。
+否则只能知道“检索器被调用过”，看不到召回质量。
 
 ---
 
-采集控制的顺序是固定的。
+采集控制的顺序不能乱。
 
-先判断这次请求能不能建节点。
+先判断请求能不能建节点，再判断当前模块能不能记录，最后才判断 payload 要不要保存。
 
-再判断当前模块能不能记录。
-
-再决定要不要保存 payload。
+请求级 `ctx.debug_capture_payload` 优先；没有单次覆盖时，才看全局 `trace_content_enabled`。
 
 ---
 
-payload 判断也有优先级。
+节点只存 input/output 不够。
 
-ctx.debug_capture_payload 优先。
+`collect_trace_config(...)` 会补组件配置，`resolve_semantic_type_for_target(...)` 会补统一语义。
 
-没有请求级覆盖，才看 trace_content_enabled。
+Retriever 写召回分数和 source id，Reranker 写重排分数，Flow 写分支命中，Agent 写循环次数和工具调用。
 
----
-
-节点只存 input、output 不够。
-
-collect_trace_config 会补组件配置。
-
-resolve_semantic_type 会补统一语义。
+这些字段决定后面能不能做批量分析。
 
 ---
 
-在线模型补模型配置。
+OpenTelemetry 层最关键的是状态拆分。
 
-Retriever 补 similarity 和 Top-K。
+`globals['trace']` 只放可序列化轻量字段，比如 `trace_id`、`parent_span_id`、tags 和采集控制。
 
-Reranker 补重排信息。
+`_current_trace` 是 ContextVar，保存请求级 LazyTrace。
 
-Flow 补控制流结构。
-
----
-
-输出属性也会补。
-
-检索分数、重排分数、分支命中。
-
-还有循环实际迭代次数。
+当前 active span 则交给 OTel context。
 
 ---
 
-OTEL 层最关键的是状态拆分。
+`start_span` 先找当前活跃 span。
 
-globals['trace'] 只放轻量、可序列化信息。
+有 active span，就把新节点挂到它下面。
 
-比如 trace_id 和 parent_span_id。
+没有 active span 时，才看轻量上下文里的 `trace_id` 和 `parent_span_id`。
 
----
-
-当前请求聚合状态放在 _current_trace。
-
-这是 ContextVar。
-
-当前 active span 交给 OTel context。
+如果有父链路字段，就重建父 `SpanContext`，把新 span 接回原 Trace。
 
 ---
 
-start_span 会先找当前活跃 span。
+`finish_span` 负责收尾。
 
-有就接到它下面。
+它构造通用 OTel 属性，再交给 backend 做 `map_attributes`。
 
-没有就看 trace_id 和 parent_span_id。
+如果节点抛异常，就 `record_exception`。
 
----
-
-如果轻量上下文里有父链路。
-
-start_span 会重建父 SpanContext。
-
-再把新 span 的 id 写回上下文。
+最后关闭 context manager，避免 active span 泄漏到后面的调用里。
 
 ---
 
-finish_span 会构造 OTel 属性。
+`enable_trace` 内部像状态栈。
 
-再让 backend 做 map_attributes。
+进入时保存旧上下文，覆盖本次入口字段，执行结束后恢复旧上下文。
 
-如果有异常，也会 record_exception。
+线程传播走 `copy_context().run(...)`，ContextVar 和 OTel active context 能一起进 worker。
 
----
-
-enable_trace 内部会保存旧上下文。
-
-覆盖本次入口字段。
-
-执行结束后，再恢复旧上下文。
+进程传播不能带 active span，只传 `globals._data` 快照，再用 `trace_id` 和 `parent_span_id` 重建父链路。
 
 ---
 
-并发传播分线程和进程。
+`LazyTrace` 负责请求级聚合。
 
-线程路径用 copy_context().run。
+首个活动 span 创建它，后续 span 登记进去。
 
-ContextVar 和 OTel active context 能一起进 worker。
+它让一次请求有完整账本，但不替代 OTel 的父子上下文。
 
----
-
-进程路径不能带活跃 span。
-
-它传 globals 数据快照。
-
-worker 侧恢复 sid，再 update global_data。
-
----
-
-进程里的新 span 不复用父进程对象。
-
-它读取 trace_id 和 parent_span_id。
-
-再接回原 Trace。
-
----
-
-LazyTrace 负责请求级聚合。
-
-首个活动 span 创建它。
-
-后续 span 登记进去。
+这个边界很重要：Trace 管聚合，OTel 管上下文和父子关系。
 
 ---
 
 Backend 层隔离写入目标。
 
-TracingBackend 只抽象两个能力。
+上游只产出标准 span 和属性。
 
-build_exporter 和 map_attributes。
-
----
-
-Langfuse 后端走 OTLP exporter。
-
-Local 后端写 JSONL。
-
-Consume backend 再把已有数据读回来。
+写到 Langfuse，还是写到本地 JSONL，不应该影响 Hook、LazySpan 和 OTel 生命周期。
 
 ---
 
-新增后端时，主要实现这一层适配。
+`TracingBackend` 主要抽象两个能力。
 
-运行层、Hook 层、OTEL 生命周期都不用重写。
+`build_exporter` 构造写入通道，`map_attributes` 把 LazyLLM 字段适配成后端字段。
+
+新增后端时，核心改动应该集中在这里，而不是回头改运行层和 hook 层。
 
 ---
 
-所以这套 Tracing 的主线很清楚。
+最后把主线收回来。
 
-Hook 负责接入。
+Hook 负责接入执行链。
 
-OTEL 负责链路。
+LazySpan 记录节点事实。
 
-Backend 负责落地。
+OpenTelemetry 负责父子关系和上下文传播。
+
+Backend 负责落地和字段映射。
+
+这四层不混，排障、评估和回归对比才能共用同一套 Trace。

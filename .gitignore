@@ -70,3 +70,8 @@ lazyllm/tokenizers/
 
 # Agents related
 AGENTS.md
+
+
+.codex
+.claude
+.DS_Store
