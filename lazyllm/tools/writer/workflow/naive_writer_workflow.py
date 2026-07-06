@@ -6,6 +6,7 @@ from ..tools.drafting_tools import WriterDraftingTools
 from ..tools.planning_tools import WriterPlanningTools
 from ..tools.quality_tools import WriterQualityTools
 from ..tools.resource_tools import WriterResourceTools
+from ..tools.revision_tools import WriterRevisionTools
 
 
 class NaiveWriterWorkflow:
@@ -20,6 +21,7 @@ class NaiveWriterWorkflow:
         planning_tools: Optional[WriterPlanningTools] = None,
         drafting_tools: Optional[WriterDraftingTools] = None,
         quality_tools: Optional[WriterQualityTools] = None,
+        revision_tools: Optional[WriterRevisionTools] = None,
     ):
         self.resource = resource_tools or WriterResourceTools(
             llm=llm,
@@ -42,6 +44,11 @@ class NaiveWriterWorkflow:
             adapters=adapters,
         )
         self.quality = quality_tools or WriterQualityTools(
+            llm=llm,
+            artifact_store=artifact_store,
+            adapters=adapters,
+        )
+        self.revision = revision_tools or WriterRevisionTools(
             llm=llm,
             artifact_store=artifact_store,
             adapters=adapters,
@@ -116,8 +123,30 @@ class NaiveWriterWorkflow:
             },
         }
 
-    def revise(self, *args, **kwargs) -> dict:
-        raise NotImplementedError('NaiveWriterWorkflow.revise is not implemented yet.')
+    def revise(self, revision_request: str, draft_document: Any, context: Any) -> dict:
+        draft_ref = self._artifact_ref(draft_document, 'draft_document')
+        context_ref = self._artifact_ref(context, 'writing_context')
+        revised_document = self.revision.revise_draft_document(
+            draft_document=draft_ref,
+            context=context_ref,
+            revision_request=revision_request,
+        )
+        revised_ref = self._artifact_ref(revised_document, 'revised_document')
+        writing_context = self.context.update_writing_context(
+            artifacts=revised_ref, context=context_ref,
+        )
+        writing_output = self.drafting.generate_writing_output(
+            draft=revised_ref,
+            context=self._artifact_ref(writing_context, 'writing_context'),
+        )
+        return {
+            'primary_result': writing_output,
+            'stage_results': {
+                'revised_document': revised_document,
+                'writing_context': writing_context,
+                'writing_output': writing_output,
+            },
+        }
 
     def _artifact_ref(self, result: Any, artifact_key: Optional[str] = None) -> Any:
         if not isinstance(result, dict):
