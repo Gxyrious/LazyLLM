@@ -125,6 +125,7 @@ XML 可以表达当前 `WriterSpan.style` 中的基本文本样式：
 | `underline` | `<u>...</u>` |
 | `strikethrough` | `<del>...</del>` |
 | `inline_code` | `<code>...</code>` |
+| `link` | `<a>...</a>` |
 
 样式叠加时按固定顺序嵌套。反向解析时维护当前激活的样式栈，每段文本按样式栈生成 `WriterSpan`，最后将所有 `WriterSpan.text` 拼接为 `WriterBlock.content`。
 
@@ -253,7 +254,7 @@ WriterSpan(text='重要', style=['bold', 'underline'])
 | `WriterBlock.type` | Markdown |
 |---|---|
 | `paragraph` | 普通段落 |
-| `heading` | `#` 至 `#########` |
+| `heading` | `#` 至 `######`；7–9 级静默回退为普通段落 |
 | `list_item` | `- item` 或 `1. item` |
 | `code` | fenced code block |
 | `quote` | `> quote` |
@@ -270,11 +271,11 @@ Markdown 格式本身负责表达 Block 类型，注释只保存 `node_id`。不
 ## 标题
 ```
 
-列表项不在项目符号之间插入独立注释行，避免破坏列表连续性；注释放在项目符号之后：
+列表项不在项目符号之间插入独立注释行，避免破坏列表连续性；注释紧跟在列表项内容之后：
 
 ```markdown
-- <!-- id="b2" -->第一项
-  - <!-- id="b3" -->子项
+- 第一项<!-- id="b2" -->
+    - 子项<!-- id="b3" -->
 ```
 
 表格块的注释放在表格前。表格单元格的 `node_id` 如果需要独立寻址，可以使用单元格内联注释；该语法在实现前需要用最终选定的 Markdown 解析器验证，确认不会改变表格单元格的文本语义。
@@ -311,6 +312,8 @@ class MarkdownAdapter:
 ```
 
 LLM 输出统一由现有结构化输出链路解析为 `PatchSet`。XML 和 Markdown Adapter 不定义路线专属 Patch 协议，`model_output_to_patch` 只进行与 JSON 路线一致的 `PatchSet` 校验和路线元信息填充。
+
+`replace` 和 `delete` 的 `old_text` 在统一校验层从原始 `WriterDocument` 快照填充，不信任模型对 XML 或 Markdown 表面文本的复制。这可以防止 `<h2>` 或 `##` 等投影标记进入面向核心 DocIR 的 Patch。
 
 三条路线的 Patch prompt 使用同一份 `PatchSet` schema 和同一组输出约束，路线之间只替换文档投影和对应的阅读说明。
 
