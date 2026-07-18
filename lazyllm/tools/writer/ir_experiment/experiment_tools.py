@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import time
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 from uuid import uuid4
-
-from pydantic import BaseModel, Field
 
 from ..data_models.task import TargetDocument, WritingTask
 from ..tools.base import WriterToolBase
 from ..utils import to_prompt_json
 from .model_adapters import MarkdownAdapter, StructuredJsonAdapter, XmlAdapter
 from .writer_ir import (
-    ModifyPlan, PatchBlock, PatchResult, PatchSet, WriterBlock, WriterDocument, WriterSpan,
+    ModifyPlan, PatchBlock, PatchHunk, PatchResult, PatchSet, WriterBlock, WriterDocument, WriterSpan,
     WriterStage,
 )
 
@@ -39,11 +36,6 @@ _WRITER_TYPE_TO_FEISHU = {
 }
 
 
-class _ContextSelection(BaseModel):
-    use_full_document: bool = False
-    section_node_ids: List[str] = Field(default_factory=list)
-
-
 class IRExperimentTools(WriterToolBase):
     '''内层 WriterDocument 与三种模型边界 Adapter 的实验骨架。'''
 
@@ -51,8 +43,6 @@ class IRExperimentTools(WriterToolBase):
         'read_writer_doc',
         'generate_modify_plan_json', 'generate_modify_plan_xml', 'generate_modify_plan_markdown',
         'generate_patch_json', 'generate_patch_xml', 'generate_patch_markdown',
-        'generate_staged_document_json', 'generate_staged_document_xml',
-        'generate_staged_document_markdown',
         'apply_patch', 'write_patch_to_feishu',
     ]
 
@@ -112,40 +102,25 @@ class IRExperimentTools(WriterToolBase):
     def generate_patch_markdown(self, modify_plan: Any, document: Any) -> PatchSet:
         return self._generate_patch(self.markdown_adapter, modify_plan, document)
 
-    # ==================== Outline -> Draft -> Final ====================
-
-    def generate_staged_document_json(self, task: Any, document: Any) -> Dict[str, Any]:
-        return self._generate_staged_document(self.json_adapter, task, document)
-
-    def generate_staged_document_xml(self, task: Any, document: Any) -> Dict[str, Any]:
-        return self._generate_staged_document(self.xml_adapter, task, document)
-
-    def generate_staged_document_markdown(self, task: Any, document: Any) -> Dict[str, Any]:
-        return self._generate_staged_document(self.markdown_adapter, task, document)
-
     # ==================== 共用：Patch 应用到内层 WriterDocument ====================
 
     def apply_patch(self, document: Any, patch_set: Any) -> Tuple[WriterDocument, PatchResult]:
         '''按 target_node_id 把 PatchSet 应用到 WriterDocument 副本。'''
-        doc = self._unified_model(document, WriterDocument).model_copy(deep=True)
+        source = self._unified_model(document, WriterDocument)
         patch = self._unified_model(patch_set, PatchSet)
-        if patch.target_doc_id != doc.document_id:
+        if patch.target_doc_id != source.document_id:
             raise ValueError(
-                f'patch targets {patch.target_doc_id!r}, not {doc.document_id!r}'
+                f'patch targets {patch.target_doc_id!r}, not {source.document_id!r}'
             )
 
-        applied, failed = [], []
-        for idx, hunk in enumerate(patch.hunks):
-            hunk_id = f'hunk-{idx}'
-            node_map, container_of = self._build_node_index(doc.blocks)
-            ok = self._apply_hunk(hunk, node_map, container_of)
-            (applied if ok else failed).append(hunk_id)
-        target_stage = patch.meta.get('target_stage')
-        if target_stage in ('outline', 'draft', 'final'):
-            doc.stage = target_stage
-            for block in self._iter_blocks(doc.blocks):
-                block.stage = target_stage
-        return doc, self._patch_result(patch, applied, failed)
+        working = source.model_copy(deep=True)
+        failed_hunk = self._apply_patch_atomically(working, patch)
+        if failed_hunk is not None:
+            return source.model_copy(deep=True), self._patch_result(
+                patch, [], [failed_hunk], 'Patch validation or application failed.',
+            )
+        applied = [f'hunk-{index}' for index in range(len(patch.hunks))]
+        return working, self._patch_result(patch, applied, [])
 
     # ==================== 共用：内层 Patch 写回飞书 ====================
 
@@ -159,17 +134,15 @@ class IRExperimentTools(WriterToolBase):
     ) -> ModifyPlan:
         doc = self._unified_model(document, WriterDocument)
         writing_task = self._unified_model(task, WritingTask)
-        context_doc = self._select_model_context(adapter, writing_task, doc)
-        model_input = adapter.document_to_model_input(context_doc)
+        model_input = adapter.document_to_model_input(doc)
         prompt = f'''You are planning a local document revision using the {adapter.name} representation.
 Understand the user request and return a ModifyPlan before any patch is generated.
 Locate every node involved in the requested replace / insert / delete / move operation, including
 destination anchors and nodes whose cross-references may be affected. Use only node_ids present in
-the document. For move, set anchor_node_id and position; set include_section=true when a heading and
-its following section must move or be deleted together. Keep the scope minimal and put instructions
-in their required execution order. If visible heading text or references must change after a structural
-operation, express each change as an explicit replace instruction; the Patch application engine never
-invents additional document edits.
+the document. One instruction edits exactly one existing block. If a logical section consists of
+multiple sibling blocks, emit one delete or move instruction for every block. For move, set
+anchor_node_id and position. Keep instructions in execution order. Express every visible numbering or
+reference change as an explicit replace instruction; Apply never invents additional document edits.
 
 Writing task:
 {to_prompt_json(writing_task)}
@@ -184,186 +157,130 @@ Document ({adapter.name}):
         missing = [nid for nid in referenced if nid not in node_ids]
         if missing:
             raise ValueError(f'modify plan targets node_ids absent from WriterDocument: {missing}')
-        plan.meta['model_representation'] = adapter.name
-        if context_doc is not doc:
-            plan.meta['context_node_ids'] = [
-                block.node_id for block in self._iter_blocks(context_doc.blocks)
-            ]
-        target_stage = writing_task.meta.get('target_stage')
-        if target_stage in ('outline', 'draft', 'final'):
-            plan.meta['target_stage'] = target_stage
         return plan
 
     def _generate_patch(self, adapter, modify_plan: Any, document: Any) -> PatchSet:
         doc = self._unified_model(document, WriterDocument)
         plan = self._unified_model(modify_plan, ModifyPlan)
-        context_node_ids = plan.meta.get('context_node_ids')
-        context_doc = self._document_subset(doc, set(context_node_ids)) if context_node_ids else doc
-        model_input = adapter.document_to_model_input(context_doc)
+        model_input = adapter.document_to_model_input(doc)
+        node_map, _ = self._build_node_index(doc.blocks)
+        range_guide = {
+            instruction.target_node_id: {
+                'characters': {
+                    index: character
+                    for index, character in enumerate(node_map[instruction.target_node_id].content)
+                },
+                'end': len(node_map[instruction.target_node_id].content),
+            }
+            for instruction in plan.instructions if instruction.modify_type == 'replace'
+        }
         prompt = f'''You are compiling an approved ModifyPlan into an executable PatchSet using
 the {adapter.name} representation.
 Produce exactly one PatchHunk for each ModifyInstruction, in the same order. Copy target_node_id,
-modify_type, position, and include_section from the instruction. For replace, return the complete new
-WriterBlock.content and preserve_styles=true. For a plain paragraph insert, target_node_id is the
-existing anchor and new_text is the complete content. For a heading, list, multi-block, nested, or
-empty-document insert, use new_blocks with semantic type/content/spans/children and use inside_start
-or inside_end when inserting into a document or container block. For delete, identify the target only.
-For move, copy anchor_node_id into anchor.node_id; no document text is copied into the Patch. Do not
-add operations absent from the plan. Leave old_text null for every operation; the Adapter injects its
-authoritative value from the core WriterDocument after generation. new_text is plain WriterBlock.content:
-never include JSON structure, XML tags, Markdown markers, or projection ID comments.
+modify_type, anchor_node_id, and position from the instruction. For replace, text_range is a Python
+Unicode character range [start, end) in WriterBlock.content and new_text contains only the replacement
+for that range, never the complete block. Count Unicode characters from zero and verify that
+0 <= start <= end <= len(content). If the user quotes the source text, the range must cover exactly
+that quoted text; do not include adjacent whitespace or punctuation. For insert, use new_blocks; do
+not use new_text. A heading PatchBlock requires numbering={{"level": 1..9}} and a list_item requires
+numbering={{"ordered": true|false}}. For delete, identify one target block only. For move, identify one
+target block and its anchor. Omit old_text; the Adapter fills it from the original WriterDocument. Do
+not include projection syntax in new_text.
 
 Modify plan:
 {to_prompt_json(plan)}
+
+Character indexes for replace targets:
+{to_prompt_json(range_guide)}
 
 Document ({adapter.name}):
 {model_input}
 '''
         model_output = self._call_llm_structured(prompt, PatchSet)
         patch = adapter.model_output_to_patch(model_output, doc)
-        if plan.meta.get('target_stage') in ('outline', 'draft', 'final'):
-            patch.meta['target_stage'] = plan.meta['target_stage']
+        if len(patch.hunks) != len(plan.instructions):
+            raise ValueError('PatchSet must contain exactly one hunk per ModifyInstruction')
+        for index, (hunk, instruction) in enumerate(zip(patch.hunks, plan.instructions)):
+            expected = (
+                instruction.target_node_id, instruction.modify_type,
+                instruction.anchor_node_id, instruction.position,
+            )
+            actual = (
+                hunk.target_node_id, hunk.modify_type, hunk.anchor_node_id, hunk.position,
+            )
+            if actual != expected:
+                raise ValueError(f'Patch hunk-{index} does not match its ModifyInstruction')
         return patch
-
-    def _generate_staged_document(self, adapter, task: Any, document: Any) -> Dict[str, Any]:
-        writing_task = self._unified_model(task, WritingTask)
-        current = self._unified_model(document, WriterDocument)
-        stages = (
-            ('outline', 'Create a complete outline only. Insert semantic heading blocks and concise '
-             'outline points into the existing document root.'),
-            ('draft', 'Expand the current outline into a coherent draft. Preserve existing block IDs '
-             'when editing them and insert detailed content under the relevant headings.'),
-            ('final', 'Polish the current draft into the final document. Preserve its structure and '
-             'block IDs while improving accuracy, coherence, and style.'),
-        )
-        history = []
-        for stage, instruction in stages:
-            stage_task = writing_task.model_copy(deep=True)
-            stage_task.query = f'{writing_task.query}\n\nStage requirement: {instruction}'
-            stage_task.meta['target_stage'] = stage
-            plan = self._generate_modify_plan(adapter, stage_task, current)
-            patch = self._generate_patch(adapter, plan, current)
-            current, result = self.apply_patch(current, patch)
-            if not result.success:
-                raise RuntimeError(f'{stage} PatchSet could not be applied: {result.failed_hunks}')
-            history.append({'stage': stage, 'modify_plan': plan, 'patch_set': patch, 'result': result})
-        return {'document': current, 'history': history}
-
-    def _select_model_context(
-        self, adapter, task: WritingTask, document: WriterDocument,
-    ) -> WriterDocument:
-        if not any(block.type == 'heading' for block in self._iter_blocks(document.blocks)):
-            return document
-        outline = self._outline_document(document)
-        prompt = f'''Choose the document context required to complete the writing task. You may
-inspect only the document outline at this step. When the target can be located from headings, return
-the smallest sufficient set of heading node_ids and set use_full_document=false. Set
-use_full_document=true only when the target cannot be located from the outline or the task inherently
-requires the complete document. Multiple relevant sections do not by themselves require the full text.
-
-Writing task:
-{to_prompt_json(task)}
-
-Document outline ({adapter.name}):
-{adapter.document_to_model_input(outline)}
-'''
-        selection = self._call_llm_structured(prompt, _ContextSelection)
-        if selection.use_full_document:
-            return document
-        node_map, _ = self._build_node_index(document.blocks)
-        invalid = [
-            node_id for node_id in selection.section_node_ids
-            if node_id not in node_map or node_map[node_id].type != 'heading'
-        ]
-        if invalid or not selection.section_node_ids:
-            raise ValueError(f'invalid context heading IDs: {invalid or selection.section_node_ids}')
-        visible = {
-            block.node_id for block in self._iter_blocks(self._outline_document(document).blocks)
-        }
-        _, container_of = self._build_node_index(document.blocks)
-        for node_id in selection.section_node_ids:
-            heading = node_map[node_id]
-            container = container_of[node_id]
-            start = container.index(heading)
-            for block in container[start:self._section_end(container, start)]:
-                visible.update(item.node_id for item in self._iter_blocks([block]))
-        return self._document_subset(document, visible)
-
-    @classmethod
-    def _outline_document(cls, document: WriterDocument) -> WriterDocument:
-        visible = {
-            block.node_id for block in cls._iter_blocks(document.blocks)
-            if block.type in ('document', 'heading')
-        }
-        return cls._document_subset(document, visible)
-
-    @classmethod
-    def _document_subset(cls, document: WriterDocument, visible: Set[str]) -> WriterDocument:
-        def copy_blocks(blocks: List[WriterBlock]) -> List[WriterBlock]:
-            copied = []
-            for block in blocks:
-                children = copy_blocks(block.children)
-                if block.node_id not in visible and not children:
-                    continue
-                clone = block.model_copy(deep=True)
-                clone.children = children
-                copied.append(clone)
-            return copied
-
-        subset = document.model_copy(deep=True)
-        subset.blocks = copy_blocks(document.blocks)
-        return subset
 
     # ==================== 私有：Patch 应用引擎 ====================
 
-    def _apply_hunk(
-        self, hunk, node_map: Dict[str, WriterBlock], container_of,
+    def _apply_patch_atomically(self, document: WriterDocument, patch: PatchSet) -> str | None:
+        node_map, _ = self._build_node_index(document.blocks)
+        replacements: Dict[str, List[Tuple[int, PatchHunk]]] = {}
+        for index, hunk in enumerate(patch.hunks):
+            target = node_map.get(hunk.target_node_id)
+            if target is None:
+                return f'hunk-{index}'
+            if hunk.modify_type == 'replace':
+                start, end = hunk.text_range
+                if (
+                    start < 0 or end < start or end > len(target.content)
+                    or target.content[start:end] != hunk.old_text
+                ):
+                    return f'hunk-{index}'
+                replacements.setdefault(hunk.target_node_id, []).append((index, hunk))
+            elif hunk.modify_type == 'delete' and target.content != hunk.old_text:
+                return f'hunk-{index}'
+            elif hunk.modify_type == 'move':
+                if hunk.anchor_node_id not in node_map or hunk.anchor_node_id == hunk.target_node_id:
+                    return f'hunk-{index}'
+
+        for hunks in replacements.values():
+            ordered = sorted(hunks, key=lambda item: item[1].text_range[0])
+            for (_, previous), (index, current) in zip(ordered, ordered[1:]):
+                if previous.text_range[1] > current.text_range[0]:
+                    return f'hunk-{index}'
+
+        for node_id, hunks in replacements.items():
+            block = node_map[node_id]
+            for _, hunk in sorted(hunks, key=lambda item: item[1].text_range[0], reverse=True):
+                self._replace_text_range(block, *hunk.text_range, hunk.new_text or '')
+
+        for index, hunk in enumerate(patch.hunks):
+            if hunk.modify_type == 'replace':
+                continue
+            node_map, container_of = self._build_node_index(document.blocks)
+            if not self._apply_block_hunk(hunk, node_map, container_of):
+                return f'hunk-{index}'
+        return None
+
+    def _apply_block_hunk(
+        self, hunk: PatchHunk, node_map: Dict[str, WriterBlock],
+        container_of: Dict[str, List[WriterBlock]],
     ) -> bool:
-        modify_type = hunk.modify_type
-        if modify_type == 'replace':
-            target = node_map.get(hunk.target_node_id)
-            if target is None or hunk.old_text != target.content:
-                return False
-            self._replace_text(target, hunk.new_text or '', hunk.preserve_styles)
+        target = node_map.get(hunk.target_node_id)
+        container = container_of.get(hunk.target_node_id)
+        if target is None or container is None:
+            return False
+        if hunk.modify_type == 'delete':
+            container.remove(target)
             return True
-        if modify_type == 'delete':
-            target = node_map.get(hunk.target_node_id)
-            container = container_of.get(hunk.target_node_id)
-            if target is None or container is None or hunk.old_text != target.content:
-                return False
-            target_index = container.index(target)
-            end_index = self._section_end(container, target_index) if hunk.include_section else target_index + 1
-            del container[target_index:end_index]
+        if hunk.modify_type == 'insert':
+            insert_at = container.index(target) + (hunk.position == 'after')
+            blocks = [self._patch_block_to_writer(block, target.stage) for block in hunk.new_blocks]
+            container[insert_at:insert_at] = blocks
             return True
-        if modify_type == 'insert':
-            anchor = node_map.get(hunk.target_node_id)
-            if anchor is None:
+        if hunk.modify_type == 'move':
+            anchor = node_map.get(hunk.anchor_node_id)
+            anchor_container = container_of.get(hunk.anchor_node_id)
+            if anchor is None or anchor_container is None:
                 return False
-            destination, insert_at = self._insertion_point(anchor, hunk.position, container_of)
-            if destination is None:
+            moved_ids = {block.node_id for block in self._iter_blocks([target])}
+            if anchor.node_id in moved_ids:
                 return False
-            payloads = hunk.new_blocks or [PatchBlock(content=hunk.new_text or '')]
-            new_blocks = [self._patch_block_to_writer(block, anchor.stage) for block in payloads]
-            destination[insert_at:insert_at] = new_blocks
-            return True
-        if modify_type == 'move':
-            target = node_map.get(hunk.target_node_id)
-            source = container_of.get(hunk.target_node_id)
-            anchor = node_map.get(hunk.anchor.node_id if hunk.anchor else '')
-            if target is None or source is None or anchor is None:
-                return False
-            source_index = source.index(target)
-            end_index = self._section_end(source, source_index) if hunk.include_section else source_index + 1
-            moving = source[source_index:end_index]
-            moving_ids = {block.node_id for root in moving for block in self._iter_blocks([root])}
-            if anchor.node_id in moving_ids:
-                return False
-            del source[source_index:end_index]
-            destination, insert_at = self._insertion_point(anchor, hunk.position, container_of)
-            if destination is None:
-                source[source_index:source_index] = moving
-                return False
-            destination[insert_at:insert_at] = moving
+            container.remove(target)
+            insert_at = anchor_container.index(anchor) + (hunk.position == 'after')
+            anchor_container.insert(insert_at, target)
             return True
         return False
 
@@ -380,68 +297,34 @@ Document outline ({adapter.name}):
         walk(roots)
         return node_map, container_of
 
-    @staticmethod
-    def _insertion_point(anchor: WriterBlock, position: str, container_of):
-        if position == 'inside_start':
-            return anchor.children, 0
-        if position == 'inside_end':
-            return anchor.children, len(anchor.children)
-        container = container_of.get(anchor.node_id)
-        if container is None:
-            return None, 0
-        anchor_index = container.index(anchor)
-        return container, anchor_index + (position == 'after')
-
-    @classmethod
-    def _section_end(cls, container: List[WriterBlock], start: int) -> int:
-        heading = container[start]
-        if heading.type != 'heading':
-            return start + 1
-        level = int(heading.numbering.get('level', 1))
-        for index in range(start + 1, len(container)):
-            candidate = container[index]
-            if candidate.type == 'heading' and int(candidate.numbering.get('level', 1)) <= level:
-                return index
-        return len(container)
-
     @classmethod
     def _patch_block_to_writer(cls, block: PatchBlock, default_stage: WriterStage) -> WriterBlock:
         return WriterBlock(
-            node_id=block.node_id or f'local-{uuid4().hex}', type=block.type,
-            content=block.content, spans=block.spans, stage=default_stage,
-            numbering=block.numbering,
-            children=[cls._patch_block_to_writer(child, default_stage) for child in block.children],
+            node_id=f'local-{uuid4().hex}', type=block.type,
+            content=block.content, stage=default_stage, numbering=block.numbering,
         )
 
     @staticmethod
-    def _replace_text(block: WriterBlock, new_text: str, preserve_styles: bool = True) -> None:
-        if not preserve_styles or not block.spans:
-            block.content = new_text
-            block.spans = []
+    def _replace_text_range(block: WriterBlock, start: int, end: int, new_text: str) -> None:
+        new_content = block.content[:start] + new_text + block.content[end:]
+        if not block.spans:
+            block.content = new_content
             return
-
         old_styles = [style for span in block.spans for style in [tuple(span.style)] * len(span.text)]
-        new_styles: List[Tuple[str, ...]] = []
-        for tag, old_start, old_end, new_start, new_end in SequenceMatcher(
-            None, block.content, new_text,
-        ).get_opcodes():
-            new_length = new_end - new_start
-            if tag == 'equal':
-                new_styles.extend(old_styles[old_start:old_end])
-            elif tag == 'replace' and old_start < old_end:
-                replaced_styles = old_styles[old_start:old_end]
-                style = replaced_styles[0] if all(item == replaced_styles[0] for item in replaced_styles) else ()
-                new_styles.extend([style] * new_length)
-            else:
-                new_styles.extend([()] * new_length)
-
+        replaced_styles = old_styles[start:end]
+        replacement_style = (
+            replaced_styles[0]
+            if replaced_styles and all(style == replaced_styles[0] for style in replaced_styles)
+            else ()
+        )
+        new_styles = old_styles[:start] + [replacement_style] * len(new_text) + old_styles[end:]
         spans: List[WriterSpan] = []
-        for character, style in zip(new_text, new_styles):
+        for character, style in zip(new_content, new_styles):
             if spans and tuple(spans[-1].style) == style:
                 spans[-1].text += character
             else:
                 spans.append(WriterSpan(text=character, style=list(style)))
-        block.content = new_text
+        block.content = new_content
         block.spans = spans
 
     # ==================== 私有：飞书写回 ====================
@@ -459,69 +342,82 @@ Document outline ({adapter.name}):
                 f'patch targets {patch.target_doc_id!r}, not Feishu document {document_id!r}'
             )
 
-        applied, failed = [], []
+        raw_blocks = fs._get_doc_blocks_raw(document_id, with_descendants=True)
+        source = WriterDocument(
+            document_id=document_id, stage='final',
+            title=resolved.get('title') or '', blocks=self._build_writer_blocks(raw_blocks),
+        )
+        _, local_result = self.apply_patch(source, patch)
+        if not local_result.success:
+            local_result.meta.update({'adapter': 'feishu', 'writeback_skipped': True})
+            return local_result
+
+        block_by_id = {block['block_id']: block for block in raw_blocks}
+        for hunk in patch.hunks:
+            target = block_by_id[hunk.target_node_id]
+            if hunk.modify_type == 'replace' and target.get('block_type') not in _FEISHU_TEXT_FIELDS:
+                raise ValueError(f'Feishu block is not text-editable: {hunk.target_node_id!r}')
+            if hunk.modify_type == 'insert':
+                for block in hunk.new_blocks:
+                    self._patch_block_to_feishu(block)
+            if hunk.modify_type in ('insert', 'delete'):
+                parent = block_by_id.get(target.get('parent_id'))
+                if parent is None or hunk.target_node_id not in parent.get('children', []):
+                    raise ValueError(f'Feishu block has no writable parent: {hunk.target_node_id!r}')
+            elif hunk.modify_type == 'move':
+                anchor = block_by_id[hunk.anchor_node_id]
+                if target.get('parent_id') != anchor.get('parent_id'):
+                    raise ValueError('Feishu block_move_after currently requires source and anchor siblings')
+
         remote_node_ids: Dict[str, Any] = {}
-        for idx, hunk in enumerate(patch.hunks):
+        indexed_hunks = list(enumerate(patch.hunks))
+        replacements = sorted(
+            (item for item in indexed_hunks if item[1].modify_type == 'replace'),
+            key=lambda item: (item[1].target_node_id, -item[1].text_range[0]),
+        )
+        structural = [item for item in indexed_hunks if item[1].modify_type != 'replace']
+        for idx, hunk in replacements + structural:
             hunk_id = f'hunk-{idx}'
             raw_blocks = fs._get_doc_blocks_raw(document_id, with_descendants=True)
             block_by_id = {block['block_id']: block for block in raw_blocks}
-            target = block_by_id.get(hunk.target_node_id)
-            if target is None:
-                failed.append(hunk_id)
-                continue
+            target = block_by_id[hunk.target_node_id]
 
             current_text, _ = self._extract_feishu_text(target)
-            if hunk.modify_type in ('replace', 'delete') and current_text != hunk.old_text:
-                failed.append(hunk_id)
-                continue
-
             if hunk.modify_type == 'replace':
+                start, end = hunk.text_range
+                if current_text[start:end] != hunk.old_text:
+                    raise ValueError(f'Feishu text changed before writeback: {hunk.target_node_id!r}')
                 block = self._to_writer_block(target)
-                self._replace_text(block, hunk.new_text or '', hunk.preserve_styles)
+                self._replace_text_range(block, start, end, hunk.new_text or '')
                 self._update_remote_text(fs, document_id, block)
             elif hunk.modify_type == 'move':
                 self._move_remote_blocks(fs, document_id, hunk, target, block_by_id)
             elif hunk.modify_type == 'insert':
-                if hunk.position in ('inside_start', 'inside_end'):
-                    parent_id = hunk.target_node_id
-                    insert_index = 0 if hunk.position == 'inside_start' else len(target.get('children', []))
-                else:
-                    parent_id = target.get('parent_id')
-                    parent = block_by_id.get(parent_id)
-                    if parent is None or 'children' not in parent:
-                        failed.append(hunk_id)
-                        continue
-                    target_index = parent['children'].index(hunk.target_node_id)
-                    insert_index = target_index + (hunk.position == 'after')
-                payloads = hunk.new_blocks or [PatchBlock(content=hunk.new_text or '')]
+                parent_id = target['parent_id']
+                parent = block_by_id[parent_id]
+                target_index = parent['children'].index(hunk.target_node_id)
+                insert_index = target_index + (hunk.position == 'after')
                 created_ids = self._create_remote_blocks(
-                    fs, document_id, parent_id, insert_index, payloads,
+                    fs, document_id, parent_id, insert_index, hunk.new_blocks,
                 )
                 remote_node_ids[hunk_id] = created_ids[0] if len(created_ids) == 1 else created_ids
             elif hunk.modify_type == 'delete':
-                parent_id = target.get('parent_id')
-                parent = block_by_id.get(parent_id)
-                if parent is None or 'children' not in parent:
-                    failed.append(hunk_id)
-                    continue
-                child_ids = parent['children']
-                target_index = child_ids.index(hunk.target_node_id)
+                if current_text != hunk.old_text:
+                    raise ValueError(f'Feishu block changed before writeback: {hunk.target_node_id!r}')
+                parent_id = target['parent_id']
+                parent = block_by_id[parent_id]
+                target_index = parent['children'].index(hunk.target_node_id)
                 children_url = (
                     f'{fs._base_url}/docx/v1/documents/{document_id}'
                     f'/blocks/{parent_id}/children'
                 )
-                end_index = self._remote_section_end(
-                    parent['children'], target_index, block_by_id,
-                ) if hunk.include_section else target_index + 1
                 fs._delete(f'{children_url}/batch_delete', json={
-                    'start_index': target_index, 'end_index': end_index,
+                    'start_index': target_index, 'end_index': target_index + 1,
                 })
-            else:
-                failed.append(hunk_id)
-                continue
-            applied.append(hunk_id)
             time.sleep(0.4)
-        result = self._patch_result(patch, applied, failed)
+        result = self._patch_result(
+            patch, [f'hunk-{index}' for index in range(len(patch.hunks))], [],
+        )
         result.meta.update({
             'adapter': 'feishu',
             'model_representation': patch.meta.get('model_representation'),
@@ -531,22 +427,17 @@ Document outline ({adapter.name}):
         return result
 
     @classmethod
-    def _move_remote_blocks(cls, fs, document_id: str, hunk, target, block_by_id) -> List[str]:
-        anchor = block_by_id.get(hunk.anchor.node_id if hunk.anchor else '')
-        if anchor is None:
-            raise ValueError(f'move anchor does not exist: {hunk.anchor.node_id!r}')
+    def _move_remote_blocks(
+        cls, fs, document_id: str, hunk: PatchHunk, target, block_by_id,
+    ) -> str:
+        anchor = block_by_id[hunk.anchor_node_id]
         parent_id = target.get('parent_id')
         parent = block_by_id.get(parent_id)
         if parent is None or anchor.get('parent_id') != parent_id:
             raise ValueError('Feishu block_move_after currently requires source and anchor siblings')
 
         child_ids = parent.get('children', [])
-        source_index = child_ids.index(hunk.target_node_id)
-        end_index = cls._remote_section_end(
-            child_ids, source_index, block_by_id,
-        ) if hunk.include_section else source_index + 1
-        moved = child_ids[source_index:end_index]
-        remaining = [node_id for node_id in child_ids if node_id not in moved]
+        remaining = [node_id for node_id in child_ids if node_id != hunk.target_node_id]
         anchor_index = remaining.index(anchor['block_id'])
         if hunk.position == 'after':
             destination_id = anchor['block_id']
@@ -560,9 +451,9 @@ Document outline ({adapter.name}):
             'command': 'block_move_after',
             'format': 'xml',
             'revision_id': -1,
-            'src_block_ids': ','.join(moved),
+            'src_block_ids': hunk.target_node_id,
         })
-        return moved
+        return hunk.target_node_id
 
     @classmethod
     def _create_remote_blocks(
@@ -578,13 +469,7 @@ Document outline ({adapter.name}):
         created = response.get('data', {}).get('children', [])
         if len(created) != len(blocks) or any(not block.get('block_id') for block in created):
             raise RuntimeError('Feishu did not return every created block ID')
-        created_ids = [block['block_id'] for block in created]
-        for created_block, patch_block in zip(created, blocks):
-            if patch_block.children:
-                cls._create_remote_blocks(
-                    fs, document_id, created_block['block_id'], 0, patch_block.children,
-                )
-        return created_ids
+        return [block['block_id'] for block in created]
 
     @classmethod
     def _patch_block_to_feishu(cls, block: PatchBlock) -> Dict[str, Any]:
@@ -602,7 +487,7 @@ Document outline ({adapter.name}):
         text_field = _FEISHU_TEXT_FIELDS[block_type]
         return {
             'block_type': block_type,
-            text_field: {'elements': cls._spans_to_feishu_elements(block.content, block.spans)},
+            text_field: {'elements': cls._spans_to_feishu_elements(block.content, [])},
         }
 
     @staticmethod
@@ -626,20 +511,6 @@ Document outline ({adapter.name}):
         fs._patch(url, json={'update_text_elements': {
             'elements': cls._spans_to_feishu_elements(block.content, block.spans),
         }})
-
-    @classmethod
-    def _remote_section_end(
-        cls, child_ids: List[str], start: int, block_by_id: Dict[str, Dict[str, Any]],
-    ) -> int:
-        target_type = block_by_id[child_ids[start]].get('block_type')
-        if not isinstance(target_type, int) or not 3 <= target_type <= 11:
-            return start + 1
-        target_level = target_type - 2
-        for index in range(start + 1, len(child_ids)):
-            block_type = block_by_id[child_ids[index]].get('block_type')
-            if isinstance(block_type, int) and 3 <= block_type <= target_level + 2:
-                return index
-        return len(child_ids)
 
     # ==================== 私有：飞书读取与构造 ====================
 
@@ -725,11 +596,13 @@ Document outline ({adapter.name}):
             yield from cls._iter_blocks(block.children)
 
     @staticmethod
-    def _patch_result(patch: PatchSet, applied: List[str], failed: List[str]) -> PatchResult:
+    def _patch_result(
+        patch: PatchSet, applied: List[str], failed: List[str], message: str | None = None,
+    ) -> PatchResult:
         return PatchResult(
             patch_id=patch.patch_id,
             success=not failed,
             applied_hunks=applied,
             failed_hunks=failed,
-            message='Patch applied.' if not failed else f'{len(failed)} hunk(s) failed.',
+            message=message or ('Patch applied.' if not failed else f'{len(failed)} hunk(s) failed.'),
         )

@@ -15,8 +15,8 @@
 ### Markdown 投影
 
 - 把同一份 `WriterDocument` 投影为模型熟悉的 Markdown，但要设计可定位的 Block 锚点和不干扰正文理解的标记。
-- 模型不输出 Git diff，而是输出类似 `old_text/new_text` 和 Block 增删移动的语义编辑指令。
-- Markdown Adapter 负责把这些指令编译为统一 Patch，不创建 `MarkdownDocument` 或 `MarkdownDocIR`。
+- 模型不输出 Git diff，而是直接输出与 JSON、XML 路线相同的统一 `PatchSet`。
+- Markdown Adapter 只负责投影和统一 Patch 边界校验，不创建 `MarkdownDocument` 或 `MarkdownDocIR`。
 
 ## 六、实验目标
 

@@ -311,9 +311,9 @@ class MarkdownAdapter:
         return str(MarkdownDocumentProjection.from_writer_document(document))
 ```
 
-LLM 输出统一由现有结构化输出链路解析为 `PatchSet`。XML 和 Markdown Adapter 不定义路线专属 Patch 协议，`model_output_to_patch` 只进行与 JSON 路线一致的 `PatchSet` 校验和路线元信息填充。
+LLM 输出统一由现有结构化输出链路解析为 `PatchSet`。XML 和 Markdown Adapter 不定义路线专属 Patch 协议，`model_output_to_patch` 与 JSON 路线使用同一套目标 ID、字符范围和锚点校验。
 
-`replace` 和 `delete` 的 `old_text` 在统一校验层从原始 `WriterDocument` 快照填充，不信任模型对 XML 或 Markdown 表面文本的复制。这可以防止 `<h2>` 或 `##` 等投影标记进入面向核心 DocIR 的 Patch。
+`replace` 只输出基于 `WriterBlock.content` 的 `text_range` 和局部 `new_text`。`replace` 和 `delete` 的 `old_text` 在统一校验层从原始 `WriterDocument` 快照填充，模型若提供 `old_text` 则直接拒绝。这可以防止 `<h2>` 或 `##` 等投影标记进入面向核心 DocIR 的 Patch。
 
 三条路线的 Patch prompt 使用同一份 `PatchSet` schema 和同一组输出约束，路线之间只替换文档投影和对应的阅读说明。
 

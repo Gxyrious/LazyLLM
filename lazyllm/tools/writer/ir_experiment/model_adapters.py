@@ -23,16 +23,25 @@ def _validate_patch(
         node_map[block.node_id] = block
         pending_blocks.extend(block.children)
     for hunk in patch.hunks:
+        if hunk.old_text is not None:
+            raise ValueError('LLM-generated PatchHunk must omit old_text')
         target = node_map.get(hunk.target_node_id)
         if target is None:
             raise ValueError(
                 f'patch targets node_id absent from WriterDocument: {hunk.target_node_id!r}'
             )
-        if hunk.modify_type in ('replace', 'delete'):
+        if hunk.modify_type == 'replace':
+            start, end = hunk.text_range
+            if start < 0 or end < start or end > len(target.content):
+                raise ValueError(
+                    f'invalid text_range {hunk.text_range!r} for node {target.node_id!r}'
+                )
+            hunk.old_text = target.content[start:end]
+        elif hunk.modify_type == 'delete':
             hunk.old_text = target.content
-        if hunk.anchor is not None and hunk.anchor.node_id not in node_map:
+        if hunk.anchor_node_id is not None and hunk.anchor_node_id not in node_map:
             raise ValueError(
-                f'patch anchor absent from WriterDocument: {hunk.anchor.node_id!r}'
+                f'patch anchor absent from WriterDocument: {hunk.anchor_node_id!r}'
             )
     patch.meta['model_representation'] = representation
     return patch

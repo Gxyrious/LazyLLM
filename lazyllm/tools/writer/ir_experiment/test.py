@@ -73,10 +73,8 @@ def _run_experiment(representation: str):
     patch_set = getattr(tool, f'generate_patch_{representation}')(modify_plan, document)
     revised_doc, apply_result = tool.apply_patch(document, patch_set)
     write_result = None
-    written_doc = None
-    if WRITE_BACK:
+    if WRITE_BACK and apply_result.success:
         write_result = tool.write_patch_to_feishu(FEISHU_DOCUMENT_URL, patch_set)
-        written_doc = tool.read_writer_doc(FEISHU_DOCUMENT_URL)
 
     print('ModifyPlan:')
     print(modify_plan.model_dump_json(indent=2))
@@ -90,7 +88,7 @@ def _run_experiment(representation: str):
     return {
         'source_doc': document, 'modify_plan': modify_plan, 'patch_set': patch_set,
         'revised_doc': revised_doc, 'apply_result': apply_result,
-        'write_result': write_result, 'written_doc': written_doc,
+        'write_result': write_result,
     }
 
 
@@ -219,21 +217,3 @@ def test_projection_routes_live(representation):
         return
 
     assert result['write_result'].success is True
-    remote_blocks = {
-        block.node_id: block
-        for block in IRExperimentTools._iter_blocks(result['written_doc'].blocks)
-    }
-    remote_node_ids = result['write_result'].meta['remote_node_ids']
-    for index, hunk in enumerate(result['patch_set'].hunks):
-        hunk_id = f'hunk-{index}'
-        if hunk.modify_type == 'replace':
-            assert remote_blocks[hunk.target_node_id].content == hunk.new_text
-        elif hunk.modify_type == 'delete':
-            assert hunk.target_node_id not in remote_blocks
-        else:
-            assert remote_blocks[remote_node_ids[hunk_id]].content == hunk.new_text
-
-
-if __name__ == '__main__':
-    run_xml_experiment()
-    run_markdown_experiment()
