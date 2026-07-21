@@ -125,7 +125,8 @@ def test_write_workflow_e2e():
         ),
     ]
 
-    result = wf.write(
+    result = lazyllm.enable_trace(
+        wf.write,
         task=task.model_dump(),
         input_resources=[r.model_dump() for r in inputs],
     )
@@ -280,7 +281,8 @@ def test_revise_workflow_e2e():
         document_summary=DocumentSummary(summary='LazyCoder Product Overview', key_points=[]),
     )
 
-    result = wf.revise(
+    result = lazyllm.enable_trace(
+        wf.revise,
         task=WritingTask(
             task_id='revise-ut',
             query=(
