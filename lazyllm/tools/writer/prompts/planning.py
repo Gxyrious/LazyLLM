@@ -2,36 +2,27 @@
 GENERATE_OUTLINE_PROMPT = '''Generate a writing outline from the given writing task and context.
 
 Requirements:
-- Return a WriterDocument object with stage="outline".
-- Set document_id to the value given in document_id_hint below.
 - Generate at least 3 top-level blocks unless the task explicitly asks for fewer.
-- Each top-level block is a section. Use type="heading" for section blocks.
-- Put the section title in block.content, and place a concrete writing instruction in
-  block.authoring.instruction.
-- Fill node_id for every block. Use stable ids such as section-1, section-2, section-1-1.
-- Use block.numbering.level for the heading level: 1 for top-level sections, incrementing for children.
-  Put child sections under block.children.
-- Constraints live in block.authoring.constraints and may only use the fields defined by WriterConstraints:
+- Each top-level block is a section. Put the section title in content, and place a concrete
+  writing instruction in authoring.instruction.
+- Use heading levels: 1 for top-level sections, incrementing for children.
+  Put child sections under children.
+- Constraints live in authoring.constraints and may only use the fields defined by WriterConstraints:
   section_goal, required_points, fact_constraints, style_constraints, relation_constraints,
   min_words, max_words, pov, tone, must_include, must_avoid.
 - Do not invent other constraints fields. Fill only the fields useful for the section.
-- block.references holds identifiers for facts or resources the section depends on.
-- Each element of block.references is an object with at least an "id" field. The id must match a
+- references holds identifiers for facts or resources the section depends on.
+- Each element of references is an object with at least an "id" field. The id must match a
   DocumentFact.fact_id or ResourceProfile.resource_id present in the input. Additional fields are allowed.
-- references is a WriterBlock field only. Never put references inside block.authoring or
-  block.authoring.constraints.
 - fact_constraints contains the literal factual statements that the section must preserve. Do not put
   fact IDs or resource IDs in fact_constraints; identifiers belong only in references.
 - Every fact_constraints statement must be grounded in the writing context. If no factual statement
   applies to a section, leave fact_constraints empty.
-- Prefer the target document title or task intent as document.title.
+- Prefer the target document title or task intent as title.
 - Use the writing context and resource profiles as constraints, not as content to copy blindly.
-- Leave spans, status, provider_binding and provider_payload empty; the system manages them.
 
 Writing task:
 {task_json}
-
-document_id_hint: {document_id_hint}
 
 Writing context:
 {context_json}

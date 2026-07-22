@@ -2,10 +2,8 @@
 GENERATE_DRAFT_SECTION_PROMPT = '''Generate a draft section from the given writing task, section instruction, and writing context.
 
 Requirements:
-- Return a single WriterBlock object with stage="draft".
-- The returned block is the section root. Use type="heading" and put the section title in content.
-- The section's actual prose lives in the block's children, each a WriterBlock with type="paragraph".
-- A paragraph child usually represents one substantial paragraph or paragraph group.
+- The section root holds the section title. The actual prose lives in its children,
+  each representing one substantial paragraph or paragraph group.
 - The section instruction is a writing plan, not a list of visible headings.
 - Use expected_blocks to guide coverage and ordering, but do not copy them verbatim as headings.
 - expected_blocks are minimum coverage cues, not a maximum block count. Expand them when needed.
@@ -19,8 +17,6 @@ Requirements:
   in the output; the system carries them from the section instruction.
 - Do not invent facts that conflict with the writing context.
 - If previous_blocks are provided, keep continuity and avoid repeating their content.
-- Fill node_id for the section root and for each child (e.g. draft-<node>-1). The system will normalize ids if needed.
-- Leave spans, status, authoring, references, provider_binding and provider_payload empty.
 
 Writing task:
 {task_json}

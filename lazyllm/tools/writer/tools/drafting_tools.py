@@ -221,7 +221,7 @@ class WriterDraftingTools(WriterToolBase):
             ))
 
         for index, child in enumerate(draft_block.children, start=1):
-            child.node_id = child.node_id or f'{section_id}-block-{index}'
+            child.node_id = f'{section_id}-block-{index}'
             child.stage = 'draft'
             if not child.type.strip():
                 child.type = 'paragraph'

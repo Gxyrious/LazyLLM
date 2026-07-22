@@ -33,11 +33,9 @@ class WriterPlanningTools(WriterToolBase):
         writing_context = self._unified_model(context, WritingContext)
         profiles = self._unified_models(resource_profiles, ResourceProfile)
         execution_data = self._normalize_execution_results(execution_results)
-        document_id_hint = self._default_outline_id(writing_task, writing_context)
 
         prompt = GENERATE_OUTLINE_PROMPT.format(
             task_json=to_prompt_json(writing_task),
-            document_id_hint=document_id_hint,
             context_json=to_prompt_json(writing_context),
             resource_profiles_json=to_prompt_json(profiles),
             execution_results_json=to_prompt_json(execution_data),
@@ -121,7 +119,7 @@ class WriterPlanningTools(WriterToolBase):
             raise ValueError('generate_outline must produce at least 3 top-level sections.')
 
         outline.stage = 'outline'
-        outline.document_id = outline.document_id or self._default_outline_id(task, context)
+        outline.document_id = self._default_outline_id(task, context)
         outline.title = outline.title or self._default_outline_title(task)
         valid_reference_ids = self._valid_reference_ids(context, profiles)
         has_available_facts = self._has_available_facts(context, profiles)
@@ -129,7 +127,7 @@ class WriterPlanningTools(WriterToolBase):
             self._normalize_outline_block(
                 block,
                 level=1,
-                fallback_id=f'section-{index}',
+                node_id=f'section-{index}',
                 valid_reference_ids=valid_reference_ids,
                 has_available_facts=has_available_facts,
             )
@@ -142,14 +140,13 @@ class WriterPlanningTools(WriterToolBase):
         block: WriterBlock,
         *,
         level: int,
-        fallback_id: str,
+        node_id: str,
         valid_reference_ids: set[str],
         has_available_facts: bool,
     ) -> None:
         block.stage = 'outline'
-        if not block.type.strip():
-            block.type = 'heading'
-        block.node_id = block.node_id or fallback_id
+        block.type = 'heading'
+        block.node_id = node_id
         block.numbering['level'] = level
         if block.authoring is None:
             block.authoring = WriterAuthoring()
@@ -162,7 +159,7 @@ class WriterPlanningTools(WriterToolBase):
             self._normalize_outline_block(
                 child,
                 level=level + 1,
-                fallback_id=f'{block.node_id}-{index}',
+                node_id=f'{block.node_id}-{index}',
                 valid_reference_ids=valid_reference_ids,
                 has_available_facts=has_available_facts,
             )
