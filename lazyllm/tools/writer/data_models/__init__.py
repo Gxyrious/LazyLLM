@@ -8,19 +8,8 @@ from .context import (
     StyleProfile,
     WritingContext,
 )
-from .writing import (
-    DraftBlock,
-    DraftDocument,
-    DraftSection,
-    OutlineNode,
-    SectionInstruction,
-    SectionInstructionList,
-    WritingOutline,
-    WritingOutput,
-    WritingSubTask,
-)
-from .docir import Anchor, DocBlock, DocIR, DocSpan
-from .revision import LocateResult, ModifyInstruction, ModifyPlan, PatchBlock, PatchHunk, PatchResult, PatchSet
+from .planning import SectionInstruction, SectionInstructionList
+from .revision import Anchor, LocateResult, ModifyInstruction, ModifyPlan, PatchBlock, PatchHunk, PatchResult, PatchSet
 from .multimodal import MediaAsset, MediaAssetLibrary, VisualInstruction
 from .quality import AuditIssue, AuditResult, ReviewReport
 from .writer_ir import WriterAuthoring, WriterBlock, WriterConstraints, WriterDocument, WriterSpan, WriterStage
@@ -29,7 +18,6 @@ __all__ = [
     'InputResource',
     'Selection',
     'TargetDocument',
-    'WritingOutput',
     'WritingTask',
     'MaterialStyle',
     'ResourceProfile',
@@ -39,18 +27,9 @@ __all__ = [
     'DocumentSummary',
     'StyleProfile',
     'WritingContext',
-    'DraftBlock',
-    'DraftDocument',
-    'DraftSection',
-    'OutlineNode',
     'SectionInstruction',
     'SectionInstructionList',
-    'WritingOutline',
-    'WritingSubTask',
     'Anchor',
-    'DocBlock',
-    'DocIR',
-    'DocSpan',
     'ModifyInstruction',
     'ModifyPlan',
     'PatchBlock',
