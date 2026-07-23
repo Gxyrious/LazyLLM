@@ -39,29 +39,16 @@ GENERATE_SECTION_INSTRUCTIONS_PROMPT = '''Generate section-level writing instruc
 
 Requirements:
 - Return a SectionInstructionList object.
-- Generate exactly one SectionInstruction for every top-level block listed in target_outline_blocks.
+- Generate exactly one SectionInstruction for every top-level block in the outline.
 - Each instruction's outline_node_id MUST equal the corresponding outline block's node_id.
-- section_title MUST equal the corresponding outline block's content.
-- instruction_id should be stable, such as instruction-section-1 or instruction-ch01.
-- section_goal should be concrete and actionable.
-- required_points should contain the key content that must appear in the section.
-- fact_constraints should preserve the literal text of locked facts and important context facts
-  relevant to this section. It must not contain fact IDs or resource IDs.
-- fact_constraints MUST only contain factual statements actually present in the writing context.
-- references are owned by the authoritative outline. Leave references empty; the system copies them from
-  the matching outline block.
-- style_constraints should include tone, pov, audience, and style requirements when applicable.
-- relation_constraints should describe dependencies on previous or later sections when useful.
 - expected_blocks should be a concise block-level content plan for the draft tool.
 - For a normal section, expected_blocks should usually contain 3 to 6 planned content blocks unless the section is explicitly very short.
 - expected_blocks are planning labels for coverage and ordering, not visible headings that must appear in final text.
+- visual_needs should describe any charts, diagrams, tables, or images the section would benefit from.
 - Do not invent facts that conflict with writing context.
 
 Outline (authoritative structure):
 {outline_json}
-
-Target outline blocks to author:
-{target_outline_blocks_json}
 
 Writing context:
 {context_json}

@@ -3,16 +3,17 @@ import os
 from typing import Any, List, Optional
 
 from .base import WriterToolBase
-from ..data_models.context import WritingContext
+from ..data_models.context import WritingContext, PROMPT_EXCLUDE as CONTEXT_EXCLUDE
 from ..data_models.task import WritingTask
 from ..data_models.writer_ir import (
-    WriterAuthoring,
     WriterBlock,
     WriterDocument,
+    PROMPT_EXCLUDE as IR_EXCLUDE,
 )
-from ..data_models.planning import SectionInstruction, SectionInstructionList
 from ..prompts import GENERATE_DRAFT_SECTION_PROMPT
 from ..utils import to_prompt_json
+
+
 
 
 class WriterDraftingTools(WriterToolBase):
@@ -25,23 +26,24 @@ class WriterDraftingTools(WriterToolBase):
     def generate_draft_section(
         self,
         task: Any,
-        section_instruction: Any,
+        section_block: Any,
         context: Any,
         previous_blocks: Any = None,
     ) -> dict:
         writing_task = self._unified_model(task, WritingTask)
-        instruction = self._unified_section_instruction(section_instruction)
+        writing_section = self._unified_section_block(section_block)
         writing_context = self._unified_model(context, WritingContext)
         previous_data = self._unified_raw_data(previous_blocks)
 
         prompt = GENERATE_DRAFT_SECTION_PROMPT.format(
             task_json=to_prompt_json(writing_task),
-            section_instruction_json=to_prompt_json(instruction),
-            context_json=to_prompt_json(writing_context),
-            previous_blocks_json=to_prompt_json(previous_data),
+            section_block_json=to_prompt_json(writing_section, exclude=IR_EXCLUDE),
+            context_json=to_prompt_json(writing_context, exclude=CONTEXT_EXCLUDE),
+            previous_blocks_json=to_prompt_json(
+                previous_data, exclude=IR_EXCLUDE) if previous_data else to_prompt_json(previous_data),
         )
-        draft_block = self._call_llm_structured(prompt, WriterBlock)
-        draft_block = self._normalize_draft_block(draft_block, instruction)
+        draft_block = self._call_llm_structured(prompt, WriterBlock, exclude=IR_EXCLUDE,
+            normalize=lambda d: self._normalize_draft_block(d, writing_section))
 
         result = self._save_artifacts(
             {'draft_block': draft_block},
@@ -56,9 +58,8 @@ class WriterDraftingTools(WriterToolBase):
                 'task_id': writing_task.task_id,
                 'context_id': writing_context.context_id,
                 'node_id': draft_block.node_id,
-                'instruction_id': instruction.instruction_id,
-                'origin_node_id': instruction.outline_node_id,
-                'outline_title': instruction.meta.get('outline_title'),
+                'instruction_id': writing_section.authoring.instruction_id if writing_section.authoring else None,
+                'origin_node_id': writing_section.node_id,
             },
             artifact_filenames={
                 'draft_block': f'draft_block/{draft_block.node_id}.json',
@@ -172,80 +173,49 @@ class WriterDraftingTools(WriterToolBase):
         dumped['output_file_path'] = output_file_path
         return dumped
 
-    def _unified_section_instruction(self, value: Any) -> SectionInstruction:
-        if isinstance(value, SectionInstruction):
-            return value
-        if isinstance(value, SectionInstructionList):
-            return self._select_section_instruction(value.instructions)
-        if isinstance(value, str):
-            value = self._load_artifact(value, validate_schema=False)
-            return self._unified_section_instruction(value)
-        if isinstance(value, dict):
-            if 'instructions' in value:
-                instruction_list = SectionInstructionList.model_validate(value)
-                return self._select_section_instruction(instruction_list.instructions)
-            return SectionInstruction.model_validate(value)
-        if isinstance(value, list):
-            instructions = [self._unified_model(item, SectionInstruction) for item in value]
-            return self._select_section_instruction(instructions)
-        raise TypeError(
-            'Expected SectionInstruction, SectionInstructionList, dict, list, or artifact path, '
-            f'got {type(value).__name__}.'
-        )
-
-    def _select_section_instruction(
-        self,
-        instructions: List[SectionInstruction],
-    ) -> SectionInstruction:
-        if not instructions:
-            raise ValueError('section instruction list is empty.')
-        return instructions[0]
 
     def _normalize_draft_block(
         self,
-        draft_block: WriterBlock,
-        instruction: SectionInstruction,
-    ) -> WriterBlock:
-        section_id = self._default_section_node_id(instruction)
-        draft_block.node_id = section_id
-        draft_block.stage = 'draft'
-        draft_block.type = 'heading'
-        draft_block.content = instruction.section_title
-
-        if not draft_block.children:
-            draft_block.children.append(WriterBlock(
-                node_id=f'{section_id}-block-1',
-                type='paragraph',
-                content='',
-                stage='draft',
-            ))
-
-        for index, child in enumerate(draft_block.children, start=1):
-            child.node_id = f'{section_id}-block-{index}'
-            child.stage = 'draft'
-            if not child.type.strip():
-                child.type = 'paragraph'
-
-        authoring_meta = {
-            'instruction_id': instruction.instruction_id,
-            'origin_node_id': instruction.outline_node_id,
+        raw_block: dict,
+        section_block: WriterBlock,
+    ) -> dict:
+        section_id = f'draft-{section_block.node_id}'
+        raw_children = raw_block.get('children') or []
+        if not raw_children:
+            raw_children = [{'type': 'paragraph', 'content': ''}]
+        for index, child in enumerate(raw_children, start=1):
+            child['node_id'] = f'{section_id}-block-{index}'
+            child['type'] = (child.get('type') or 'paragraph').strip() or 'paragraph'
+            child['stage'] = 'draft'
+        raw_block['children'] = raw_children
+        raw_block['node_id'] = section_id
+        raw_block['type'] = 'heading'
+        raw_block['stage'] = 'draft'
+        raw_block['content'] = section_block.content
+        raw_block['authoring'] = {
+            'instruction_id': section_block.authoring.instruction_id if section_block.authoring else None,
+            'origin_node_id': section_block.node_id,
+            'source': 'section_instruction',
         }
-        for key in ('outline_id', 'outline_title'):
-            value = instruction.meta.get(key)
-            if value is not None:
-                authoring_meta[key] = value
-        draft_block.authoring = WriterAuthoring(
-            instruction_id=instruction.instruction_id,
-            origin_node_id=instruction.outline_node_id,
-            source='section_instruction',
-            meta=authoring_meta,
-        )
+        raw_block['references'] = [dict(r) for r in section_block.references]
+        return raw_block
 
-        draft_block.references = [dict(reference) for reference in instruction.references]
-        return draft_block
-
-    def _default_section_node_id(self, instruction: SectionInstruction) -> str:
-        return f'draft-{instruction.outline_node_id}'
+    def _unified_section_block(self, value: Any) -> WriterBlock:
+        if isinstance(value, WriterBlock):
+            return value
+        if isinstance(value, WriterDocument):
+            if not value.blocks:
+                raise ValueError('WriterDocument has no blocks.')
+            return value.blocks[0]
+        if isinstance(value, str):
+            loaded = self._load_artifact(value, validate_schema=False)
+            return self._unified_section_block(loaded)
+        if isinstance(value, dict):
+            if 'document_id' in value or ('blocks' in value and isinstance(value['blocks'], list)):
+                return self._unified_section_block(WriterDocument.model_validate(value))
+            return WriterBlock.model_validate(value)
+        raise TypeError(
+           f'Expected WriterBlock or WriterDocument, got {type(value).__name__}.')
 
     def _unified_draft_blocks(self, value: Any) -> List[WriterBlock]:
         if value is None:

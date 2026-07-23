@@ -8,7 +8,6 @@ from ..data_models.quality import AuditResult, ReviewReport
 from ..data_models.revision import PatchSet
 from ..data_models.task import WritingTask
 from ..data_models.writer_ir import WriterBlock, WriterDocument
-from ..data_models.planning import SectionInstruction, SectionInstructionList
 from ..prompts.quality import (
     VALIDATE_DRAFT_DOCUMENT_PROMPT,
     VALIDATE_PATCH_SET_PROMPT,
@@ -27,23 +26,23 @@ class WriterQualityTools(WriterToolBase):
     def validate_section(
         self,
         draft_block: Any,
-        section_instruction: Any,
+        outline: Any,
         context: Any,
     ) -> dict:
         draft = self._unified_model(draft_block, WriterBlock)
-        instruction_list = self._unified_model(section_instruction, SectionInstructionList)
+        writing_outline = self._unified_model(outline, WriterDocument)
         writing_context = self._unified_model(context, WritingContext)
         self._require_stage(draft.stage, 'draft', 'draft_block')
 
-        instruction = self._match_instruction(draft, instruction_list)
-        if instruction is None:
+        section_block = self._match_outline_block(draft, writing_outline)
+        if section_block is None:
             raise ValueError(
-                f'No section instruction matches draft block {draft.node_id!r}.'
+                f'No outline block matches draft block {draft.node_id!r}.'
             )
 
         prompt = VALIDATE_SECTION_PROMPT.format(
             section_json=to_prompt_json(draft),
-            instruction_json=to_prompt_json(instruction),
+            instruction_json=to_prompt_json(section_block),
             context_json=to_prompt_json(writing_context),
         )
         audit_result = self._call_llm_structured(prompt, AuditResult)
@@ -52,9 +51,9 @@ class WriterQualityTools(WriterToolBase):
             target=draft.node_id,
             result=audit_result,
             meta={
-                'instruction_id': instruction.instruction_id,
-                'outline_node_id': instruction.outline_node_id,
-                'section_title': instruction.section_title,
+                'instruction_id': section_block.authoring.instruction_id if section_block.authoring else None,
+                'outline_node_id': section_block.node_id,
+                'section_title': section_block.content,
             },
         )
         counts = self._issue_counts(audit_result)
@@ -69,13 +68,13 @@ class WriterQualityTools(WriterToolBase):
                 'total_issues': len(audit_result.issues),
                 **counts,
             },
-            artifact_meta={
-                'draft_node_id': draft.node_id,
-                'outline_node_id': instruction.outline_node_id,
-                'instruction_id': instruction.instruction_id,
-                'is_passed': audit_result.is_passed,
-                'score': audit_result.score,
-            },
+           artifact_meta={
+               'draft_node_id': draft.node_id,
+               'outline_node_id': section_block.node_id,
+               'instruction_id': section_block.authoring.instruction_id if section_block.authoring else None,
+               'is_passed': audit_result.is_passed,
+               'score': audit_result.score,
+           },
         ).model_dump()
 
     def validate_draft_document(
@@ -184,25 +183,16 @@ class WriterQualityTools(WriterToolBase):
             },
         ).model_dump()
 
-    def _match_instruction(
+    def _match_outline_block(
         self,
         draft_block: WriterBlock,
-        instruction_list: SectionInstructionList,
-    ) -> Optional[SectionInstruction]:
+        outline: WriterDocument,
+    ) -> Optional[WriterBlock]:
         draft_authoring = draft_block.authoring
-        instruction_id = draft_authoring.instruction_id if draft_authoring else None
         origin_node_id = draft_authoring.origin_node_id if draft_authoring else None
 
-        if instruction_id:
-            for instruction in instruction_list.instructions:
-                if instruction.instruction_id == instruction_id:
-                    return instruction
-
         if origin_node_id:
-            for instruction in instruction_list.instructions:
-                if instruction.outline_node_id == origin_node_id:
-                    return instruction
-
+            return outline.block_by_id(origin_node_id)
         return None
 
     def _issue_counts(self, audit_result: AuditResult) -> dict:

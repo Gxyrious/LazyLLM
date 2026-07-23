@@ -137,7 +137,13 @@ class WriterDocument(BaseModel):
 WriterDocument.model_rebuild()
 
 
+# System fields excluded when serializing Writer IR types for LLM prompts.
+PROMPT_EXCLUDE = {'node_id', 'document_id', 'type', 'stage', 'spans', 'status',
+                  'numbering', 'provider_binding', 'provider_payload',
+                  'editable', 'revision', 'metadata'}
+
 __all__ = [
     'WriterDocument', 'WriterBlock', 'WriterSpan', 'WriterStage',
     'WriterConstraints', 'WriterAuthoring',
+    'PROMPT_EXCLUDE',
 ]

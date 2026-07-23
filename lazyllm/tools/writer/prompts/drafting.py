@@ -21,8 +21,8 @@ Requirements:
 Writing task:
 {task_json}
 
-Section instruction:
-{section_instruction_json}
+Section block:
+{section_block_json}
 
 Writing context:
 {context_json}

@@ -23,3 +23,6 @@ class ResourceProfile(BaseModel):
     key_facts: List[str] = Field(default_factory=list)
     style: Optional[MaterialStyle] = None
     meta: Dict[str, Any] = Field(default_factory=dict)
+
+# Fields excluded when serializing ResourceProfile for LLM prompts.
+PROMPT_EXCLUDE = {'meta', 'raw_content', 'extracted_outline', 'extracted_constraints'}

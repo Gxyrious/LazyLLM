@@ -53,3 +53,7 @@ class WritingContext(ArtifactModel):
 
 
 WritingContext.model_rebuild()
+
+# Fields excluded when serializing WritingContext for LLM prompts.
+PROMPT_EXCLUDE = {'context_id', 'doc_id', 'meta', 'outline',
+                  'draft_sections', 'draft_document', 'relation_graph'}

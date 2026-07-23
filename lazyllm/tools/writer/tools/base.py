@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import os
-from typing import Any, Dict, Iterable, List, Optional, Type, TypeVar
+from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Type, TypeVar
 from pydantic import BaseModel
 from lazyllm.components.formatter import JsonFormatter
 from lazyllm.module import ModuleBase
@@ -171,17 +171,27 @@ class WriterToolBase(ModuleBase):
         module = cls.__module__ or ''
         return f'{module}.{cls.__qualname__}'
 
-    def _call_llm_structured(self, prompt: str, schema: Type[T]) -> T:
+    def _call_llm_structured(self, prompt: str, schema: Type[T],
+                             *, exclude: Optional[Collection[str]] = None,
+                             normalize: Optional[Callable[[dict], dict]] = None) -> T:
         if self.llm is None:
             raise ValueError('llm is not set')
-
-        system_prompt = self._structured_output_prompt(schema)
+        system_prompt = self._structured_output_prompt(schema, exclude=exclude)
         model = self._build_structured_llm(system_prompt)
         response = model(prompt)
-        return self._validate_structured_response(response, schema)
+        return self._validate_structured_response(response, schema, normalize=normalize)
 
-    def _structured_output_prompt(self, schema: Type[BaseModel]) -> str:
-        schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)
+    def _structured_output_prompt(self, schema: Type[BaseModel],
+                                  *, exclude: Optional[Collection[str]] = None) -> str:
+        schema_dict = schema.model_json_schema()
+        if exclude:
+            for definition in schema_dict.get('$defs', {}).values():
+                props = definition.get('properties', {})
+                for field in exclude:
+                    props.pop(field, None)
+                definition['required'] = [
+                    r for r in definition.get('required', []) if r not in exclude]
+        schema_json = json.dumps(schema_dict, ensure_ascii=False, indent=2)
         return STRUCTURED_OUTPUT_SYSTEM_PROMPT.format(schema_name=schema.__name__, schema_json=schema_json)
 
     def _build_structured_llm(self, system_prompt: str) -> Any:
@@ -197,7 +207,8 @@ class WriterToolBase(ModuleBase):
             model = model.formatter(JsonFormatter())
         return model
 
-    def _validate_structured_response(self, response: Any, schema: Type[T]) -> T:
+    def _validate_structured_response(self, response: Any, schema: Type[T],
+                                     *, normalize: Optional[Callable[[dict], dict]] = None) -> T:
         parsed = response
         if isinstance(parsed, schema):
             return parsed
@@ -212,6 +223,8 @@ class WriterToolBase(ModuleBase):
         if isinstance(parsed, list) and len(parsed) == 1:
             parsed = parsed[0]
         if isinstance(parsed, dict):
+            if normalize is not None:
+                parsed = normalize(parsed)
             try:
                 return schema.model_validate(parsed)
             except Exception as exc:
