@@ -129,6 +129,8 @@ class WriterDraftingTools(WriterToolBase):
 
         writing_context = self._unified_model(context, WritingContext)
         draft_document = self._unified_draft_document(draft, writing_context)
+        if draft_document.stage != 'draft':
+            raise ValueError('generate_final_document requires a draft-stage WriterDocument.')
         content = render_document_markdown(draft_document)
         final_document = WriterDocument(
             document_id=self._default_final_document_id(draft_document, writing_context),

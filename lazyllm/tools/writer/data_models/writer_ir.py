@@ -26,7 +26,7 @@ class WriterBlock(BaseModel):
     content: str = ''
     spans: List[WriterSpan] = Field(default_factory=list)
     children: List['WriterBlock'] = Field(default_factory=list)
-    stage: WriterStage
+    stage: WriterStage = 'draft'
     numbering: Dict[str, Any] = Field(default_factory=dict)
     references: List[Dict[str, Any]] = Field(default_factory=list)
     # Provider-neutral binding contract. Common keys are provider, uri, document_id,
