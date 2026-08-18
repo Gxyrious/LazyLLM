@@ -246,6 +246,9 @@ def materialize_ir(document: WriterDocument, numbering: NumberingMap) -> WriterD
         entry = numbering.get(block.node_id)
         if entry is not None and block.type in {'heading', 'image', 'table', 'code'}:
             prefix = format_target_number(entry)
+            if block.type == 'code':
+                block.provider_payload['numbering_caption'] = prefix
+                continue
             block.content = f'{prefix} {block.content}'.strip()
             if block.spans and block.spans[0].text:
                 block.spans[0].text = f'{prefix} {block.spans[0].text}'.strip()
@@ -272,7 +275,7 @@ def materialize_markdown(markdown: str) -> str:
                 target = targets[target_index] if target_index < len(targets) else None
                 if target is not None and target.kind == 'code':
                     label = format_target_number(numbering[target.id])
-                    output.append(f'{label} {target.caption or ""}'.strip())
+                    output.append(label)
                     target_index += 1
             elif fence == marker:
                 fence = None
@@ -326,6 +329,7 @@ def dematerialize_ir(
 ) -> WriterDocument:
     result = document.model_copy(deep=True)
     for block in _iter_blocks(result.blocks):
+        block.provider_payload.pop('numbering_caption', None)
         entry = base_numbering.get(block.node_id)
         if entry is not None and _KIND_BY_TYPE.get(block.type) == entry.kind:
             prefix = f'{format_target_number(entry)} '
@@ -366,7 +370,11 @@ def dematerialize_markdown(markdown: str, base_numbering: NumberingMap | None = 
         if len(next_targets) == 1 and next_targets[0].kind in {'table', 'code'}:
             entry = (base_numbering or {}).get(next_targets[0].id)
             if entry is not None and entry.kind == next_targets[0].kind:
-                caption = f'{format_target_number(entry)} {entry.caption or ""}'.strip()
+                caption = (
+                    format_target_number(entry)
+                    if next_targets[0].kind == 'code'
+                    else f'{format_target_number(entry)} {entry.caption or ""}'.strip()
+                )
                 if line == caption:
                     continue
 
