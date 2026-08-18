@@ -252,8 +252,6 @@ def materialize_ir(document: WriterDocument, numbering: NumberingMap) -> WriterD
             block.content = f'{prefix} {block.content}'.strip()
             if block.spans and block.spans[0].text:
                 block.spans[0].text = f'{prefix} {block.spans[0].text}'.strip()
-        if block.spans:
-            block.content = ''.join(span.text for span in block.spans)
     return result
 
 
