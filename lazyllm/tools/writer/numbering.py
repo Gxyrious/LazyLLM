@@ -156,6 +156,10 @@ def build_numbering_view_from_markdown(markdown: str) -> NumberingView:
     references: list[ReferenceOccurrence] = []
     order = 0
     for _, line, kind, caption, anchors in _markdown_semantic_items(markdown):
+        # The document H1 is its title, not a numbered section. Markdown H2 is
+        # the first numbered section and therefore maps to IR level 1.
+        if kind == 'heading' and len(_HEADING_RE.match(line).group(1)) == 1:
+            continue
         order += 1
         target_id = (
             decode_anchor_id(anchors[0])
@@ -201,16 +205,20 @@ def compute_numbering(view: NumberingView) -> NumberingMap:
     validate_numbering_view(view)
     numbering: NumberingMap = {}
     counters: list[int] = []
+    previous_level = 0
     float_counters = {'figure': 0, 'table': 0, 'code': 0}
 
     for target in view.targets:
         if target.kind == 'section':
-            level = target.level or 1
+            level = max(1, int(target.level or 1))
+            # A document cannot start at a nested level or skip a hierarchy.
+            level = min(level, previous_level + 1)
             if level <= len(counters):
                 counters = counters[:level]
             counters.extend([0] * (level - len(counters)))
             counters[-1] += 1
             number_parts = tuple(counters)
+            previous_level = level
         else:
             float_counters[target.kind] += 1
             number_parts = (float_counters[target.kind],)
