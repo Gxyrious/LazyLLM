@@ -242,34 +242,6 @@ def materialize_ir(document: WriterDocument, numbering: NumberingMap) -> WriterD
     return result
 
 
-def materialize_feishu_links(
-    document: WriterDocument,
-    document_token: str,
-    host: str = 'feishu.cn',
-) -> WriterDocument:
-    block_id_by_node_id = {
-        block.node_id: block.provider_binding.get('block_id')
-        for block in _iter_blocks(document.blocks)
-    }
-    result = document.model_copy(deep=True)
-    for block in _iter_blocks(result.blocks):
-        for span in block.spans:
-            link = span.style.get('link')
-            if not isinstance(link, dict) or link.get('type') != 'internal_ref':
-                continue
-            target_id = link.get('target_node_id')
-            target_block_id = block_id_by_node_id.get(target_id)
-            if not target_block_id:
-                span.style['link'] = {
-                    'url': f'https://{host}/docx/{document_token}#{target_id}',
-                }
-                continue
-            span.style['link'] = {
-                'url': f'https://{host}/docx/{document_token}#{target_block_id}',
-            }
-    return result
-
-
 def materialize_markdown(markdown: str) -> str:
     view = build_numbering_view_from_markdown(markdown)
     numbering = compute_numbering(view)
@@ -445,7 +417,6 @@ __all__ = [
     'encode_anchor_id',
     'format_target_number',
     'materialize_markdown',
-    'materialize_feishu_links',
     'materialize_ir',
     'validate_numbering_view',
 ]
