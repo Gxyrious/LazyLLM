@@ -327,16 +327,26 @@ def dematerialize_ir(
     document: WriterDocument,
     base_numbering: NumberingMap,
 ) -> WriterDocument:
+    from .utils.serialization import strip_caption_numbering, strip_heading_numbering
+
     result = document.model_copy(deep=True)
     for block in _iter_blocks(result.blocks):
         block.provider_payload.pop('numbering_caption', None)
         entry = base_numbering.get(block.node_id)
         if entry is not None and _KIND_BY_TYPE.get(block.type) == entry.kind:
-            prefix = f'{format_target_number(entry)} '
-            if block.content.startswith(prefix):
-                block.content = block.content[len(prefix):]
-            if block.spans and block.spans[0].text.startswith(prefix):
-                block.spans[0].text = block.spans[0].text[len(prefix):]
+            if block.type == 'heading':
+                block.content = strip_heading_numbering(block.content)
+            elif block.type in {'image', 'table'}:
+                block.content = strip_caption_numbering(block.content)
+            if block.spans:
+                first = block.spans[0].text
+                block.spans[0].text = (
+                    strip_heading_numbering(first)
+                    if block.type == 'heading'
+                    else strip_caption_numbering(first)
+                    if block.type in {'image', 'table'}
+                    else first
+                )
         if block.spans:
             block.content = ''.join(span.text for span in block.spans)
     return result
