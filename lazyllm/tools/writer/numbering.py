@@ -205,12 +205,16 @@ def compute_numbering(view: NumberingView) -> NumberingMap:
     validate_numbering_view(view)
     numbering: NumberingMap = {}
     counters: list[int] = []
+    root_level: int | None = None
     previous_level = 0
     float_counters = {'figure': 0, 'table': 0, 'code': 0}
 
     for target in view.targets:
         if target.kind == 'section':
-            level = max(1, int(target.level or 1))
+            raw_level = max(1, int(target.level or 1))
+            if root_level is None:
+                root_level = raw_level
+            level = max(1, raw_level - root_level + 1)
             # A document cannot start at a nested level or skip a hierarchy.
             level = min(level, previous_level + 1)
             if level <= len(counters):
