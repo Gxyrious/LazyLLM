@@ -10,6 +10,7 @@ from ..data_models.resource import ResourceProfile
 from ..data_models.task import WritingTask
 from ..data_models.writer_ir import ContentRef, WriterBlock, WriterDocument
 from ..data_models.planning import SectionInstruction, SectionInstructionList, ShortWritingPlan
+from ..numbering import ensure_markdown_heading_anchors
 from ..prompts import (
     GENERATE_OUTLINE_MARKDOWN_PROMPT,
     GENERATE_OUTLINE_PROMPT,
@@ -720,9 +721,7 @@ class WriterPlanningTools(WriterToolBase):
                 lines.append(f'{heading.group(1)} {title}')
                 continue
             lines.append(line)
-        return WriterPlanningTools._materialize_markdown_outline_anchors(
-            '\n'.join(lines).rstrip() + '\n',
-        )
+        return ensure_markdown_heading_anchors('\n'.join(lines).rstrip() + '\n')
 
     @staticmethod
     def _remove_outline_image_markup(line: str) -> str:
@@ -744,19 +743,6 @@ class WriterPlanningTools(WriterToolBase):
             line,
         )
         return re.sub(r'<img\b[^>]*>', '', line, flags=re.IGNORECASE)
-
-    @staticmethod
-    def _materialize_markdown_outline_anchors(outline: str) -> str:
-        _, targets = get_markdown_outline_targets(outline)
-        target_ids = iter(
-            WriterPlanningTools._markdown_outline_node_ids(targets).values()
-        )
-        lines: List[str] = []
-        for line, in_fence in WriterPlanningTools._markdown_lines_with_fence_state(outline):
-            if not in_fence and re.match(r'^##\s+.+?\s*$', line):
-                lines.append(f'<a id="block-{next(target_ids)}"></a>')
-            lines.append(line)
-        return '\n'.join(lines).rstrip() + '\n'
 
     @staticmethod
     def _markdown_lines_with_fence_state(markdown: str):

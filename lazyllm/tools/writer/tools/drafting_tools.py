@@ -15,6 +15,7 @@ from ..numbering import (
     build_numbering_view_from_ir,
     build_numbering_view_from_markdown,
     compute_numbering,
+    ensure_markdown_heading_anchors,
 )
 from ..prompts import (
     CONDENSE_DRAFT_SECTION_MARKDOWN_PROMPT,
@@ -1046,7 +1047,7 @@ class WriterDraftingTools(WriterToolBase):
             section.strip() for section in section_markdown
         )
         markdown = markdown.rstrip() + '\n'
-        markdown = self._ensure_markdown_outline_anchors(markdown)
+        markdown = ensure_markdown_heading_anchors(markdown)
         compute_numbering(build_numbering_view_from_markdown(markdown))
         assembled_sections = [
             section for section in parse_markdown_sections(markdown)
@@ -1538,56 +1539,6 @@ class WriterDraftingTools(WriterToolBase):
         if isinstance(document_targets, list):
             allowed_targets.update(str(target) for target in document_targets)
         return references, allowed_targets
-
-    @staticmethod
-    def _ensure_markdown_outline_anchors(markdown: str) -> str:
-        output: List[str] = []
-        pending_anchors: List[str] = []
-        counters: List[int] = []
-        fence: str | None = None
-        for line in markdown.splitlines():
-            fence_match = re.match(r'^\s*(```+|~~~+)', line)
-            if fence_match:
-                marker = fence_match.group(1)[0]
-                if fence is None:
-                    fence = marker
-                elif fence == marker:
-                    fence = None
-                output.append(line)
-                continue
-            if fence is not None:
-                output.append(line)
-                continue
-
-            anchors = [
-                target
-                for target in WriterDraftingTools._MARKDOWN_ANCHOR_RE.findall(line)
-                if target.startswith('block-sec-')
-            ]
-            if anchors:
-                pending_anchors.extend(anchors)
-                output.append(line)
-                continue
-            heading = re.match(r'^(#{2,6})\s+(.+?)\s*$', line)
-            if heading:
-                depth = len(heading.group(1)) - 1
-                counters = counters[:depth]
-                counters.extend([0] * (depth - len(counters)))
-                counters[-1] += 1
-                expected = 'block-sec-' + '-'.join(
-                    f'{value:03d}' for value in counters
-                )
-                if not pending_anchors:
-                    output.append(f'<a id="{expected}"></a>')
-                elif pending_anchors[0] != expected:
-                    raise ValueError(
-                        f'Unexpected heading anchor {pending_anchors[0]!r}; expected {expected!r}.'
-                    )
-                pending_anchors = []
-            elif line.strip() and pending_anchors:
-                pending_anchors = []
-            output.append(line)
-        return '\n'.join(output)
 
     @staticmethod
     def _media_assets_for_section(

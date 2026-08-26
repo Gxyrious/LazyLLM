@@ -7,8 +7,16 @@ Requirements:
 - Start with exactly one H1 document title.
 - Add at least one H2 section directly under the H1 title.
 - Every H2 section title must be unique.
-- Use H3-H6 only for optional subsection planning under an H2 section.
-- Write titles and section titles without visible numbering; the system renders numbers.
+- Use H3-H6 for subsection planning under an H2 section; never use list items as
+  substitutes for subsection headings.
+- Write every heading without visible numbering; the system renders numbers. Ignore
+  requested labels such as "1", "1.1", "一、", or "(1)" while preserving their structure.
+- Follow this shape when subsections are needed:
+  # Document title
+  ## Section title
+  ### Subsection title
+  ### Another subsection
+  ## Another section
 - Treat the outline as the exact structural skeleton of the final deliverable: every H2
   will become a visible section in the drafted document.
 - Do not create meta-planning H2 sections such as background and setting, character
