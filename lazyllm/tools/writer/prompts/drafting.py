@@ -5,6 +5,8 @@ Requirements:
 - Return a single WriterBlock object with stage="draft".
 - The returned block is the section root. Use type="heading" and put the section title in content.
 - The section's actual prose lives in the block's children. Use paragraph blocks for prose.
+- When heading_structure is present, reproduce every listed descendant heading with its exact
+  title, level, and order, and do not add other headings. An empty list means no subheadings.
 - A paragraph child usually represents one substantial paragraph or paragraph group.
 - The section instruction is a writing plan, not a list of visible headings.
 - Write headings without visible numbering; the system renders numbers.
@@ -44,7 +46,8 @@ Requirements:
   If must_create=true, create one child WriterBlock with type="image",
   node_id=target, and content=caption.
   To reference a target, use a non-empty internal_ref span for the natural words that
-  carry the link, with target_node_id=target. All spans together must contain the complete sentence.
+  carry the link, with target_node_id=target. The span text must occur verbatim in content;
+  unstyled surrounding text may be omitted from spans because the system fills it.
   Example: {{"text":"架构设计","style":{{"link":{{"type":"internal_ref","target_node_id":"sec-2"}}}}}}.
   A required image item produces both its image child block and one internal_ref span in prose.
   Include each required target exactly once, and use no references beyond this plan.
@@ -74,6 +77,9 @@ Requirements:
 - Output Markdown only. Do not wrap the response in an outer code fence.
 - Do not output reasoning, analysis, review notes, or <think> tags.
 - Do not output the section title or its heading; the system adds the heading.
+- When heading_structure is present, reproduce every listed descendant heading with its exact
+  title and order, using item.level + 1 as its Markdown heading level. Do not add other headings.
+  An empty list means no subheadings.
 - Follow the section instruction as a writing plan, not as a list of visible headings.
 - Treat expected_blocks as coverage priorities, not minimum paragraph counts. Combine or
   omit secondary cues when necessary to fit the section budget.
@@ -124,7 +130,8 @@ CONDENSE_DRAFT_SECTION_PROMPT = '''Condense this WriterBlock draft section.
 
 Requirements:
 - Return one WriterBlock with the same root node_id, heading, and stage="draft".
-- Keep the main plot or argument, ending, point of view, tone, and required non-text blocks.
+- Keep every heading unchanged, along with the main plot or argument, ending, point of view,
+  tone, and required non-text blocks.
 - Do not add new facts, scenes, claims, headings, or planning notes.
 - The combined non-whitespace prose in the returned block's descendants must not exceed {max_chars} characters.
 
@@ -138,7 +145,8 @@ Draft section:
 
 CONDENSE_DRAFT_SECTION_MARKDOWN_PROMPT = '''Condense this Markdown section body to at most {max_chars} non-whitespace characters.
 
-Preserve the main plot or argument, ending, point of view, tone, and essential Markdown.
+Preserve every heading unchanged, along with the main plot or argument, ending, point of view,
+tone, and essential Markdown.
 Do not add new content, a section heading, reasoning, or planning notes.
 Return only the condensed section body.
 

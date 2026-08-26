@@ -296,6 +296,7 @@ Requirements:
   relevant to this section. It must not contain fact IDs or resource IDs.
 - fact_constraints MUST only contain factual statements actually present in the writing context.
 - references are owned by the authoritative outline. Omit references; the system normalizes them.
+- heading_structure is owned by the authoritative outline. Omit it; the system normalizes it.
 - style_constraints should include tone, pov, audience, and style requirements when applicable.
 - Sections may be drafted independently and in parallel. Resolve document-global narrative
   choices during planning: choose one point of view, tense, narrative voice, and protagonist
@@ -316,7 +317,8 @@ Requirements:
    conclusion citing the experiments it summarizes. This is expected when the writing
    task asks for cross-references; in that case include at least one section reference.
    Represent every planned reference in SectionInstruction.meta.cross_references as
-   an object with target_ref, kind, required, and guidance.
+   an object with target_ref, required, and guidance. Omit kind; the system derives it
+   from the resolved target.
    Background continuity readers are assumed to know
    (such as narrative chapters building on earlier events) belongs in relation_constraints.
    For Writer IR, target_ref is {{"node_id": "..."}} copied from the outline.
@@ -324,7 +326,7 @@ Requirements:
    Its guidance names the information the reader needs from that target.
 - Visual plan needs own created images. Do not add must_create image objects; the system adds them.
    To reference a planned image in this or another section, use
-   target_ref: {{"node_id": "<that visual need_id>"}} with must_create=false and kind="image".
+   target_ref: {{"node_id": "<that visual need_id>"}} with must_create=false.
 - Use guidance to describe what natural wording should carry each reference link.
 - Do not invent facts that conflict with writing context.
 

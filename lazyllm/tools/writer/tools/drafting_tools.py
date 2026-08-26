@@ -8,7 +8,7 @@ from .stream_tools import DraftIRStream, DraftMarkdownStream, OutlineIRStream, r
 from ..data_models.context import WritingContext
 from ..data_models.multimodal import MediaAssetLibrary, VisualPlan
 from ..data_models.task import WritingTask
-from ..data_models.writer_ir import WriterBlock, WriterDocument
+from ..data_models.writer_ir import WriterBlock, WriterDocument, WriterSpan
 from ..data_models.planning import SectionInstruction, ShortWritingPlan
 from ..numbering import (
     MARKDOWN_ANCHOR_RE,
@@ -1249,6 +1249,18 @@ class WriterDraftingTools(WriterToolBase):
             != strip_heading_numbering(instruction.content_ref.heading_path[-1])
         ):
             raise ValueError('Markdown draft section heading does not match its content_ref.')
+        if instruction.heading_structure is not None:
+            actual = [
+                (level - 1, strip_heading_numbering(heading_path[-1]))
+                for level, heading_path, _, _ in sections
+                if level > 2
+            ]
+            expected = [
+                (item.level, item.title)
+                for item in instruction.heading_structure
+            ]
+            if actual != expected:
+                raise ValueError('Markdown draft section does not preserve its heading structure.')
 
     @staticmethod
     def _markdown_draft_section_title(markdown: str) -> str:
@@ -1282,10 +1294,38 @@ class WriterDraftingTools(WriterToolBase):
             elif block.type == 'image':
                 block.content = strip_caption_numbering(block.content)
         draft_block.references = [dict(reference) for reference in instruction.references]
+        self._normalize_ir_heading_structure(
+            draft_block, instruction, allow_partial=allow_deferred_create,
+        )
         self._normalize_ir_cross_references(
             draft_block, instruction, allow_deferred_create=allow_deferred_create,
         )
         return draft_block
+
+    @staticmethod
+    def _normalize_ir_heading_structure(
+        draft_block: WriterBlock,
+        instruction: SectionInstruction,
+        *,
+        allow_partial: bool,
+    ) -> None:
+        structure = instruction.heading_structure
+        if structure is None:
+            return
+        headings = [
+            block for block in draft_block.iter_blocks()
+            if block is not draft_block and block.type == 'heading'
+        ]
+        expected = structure[:len(headings)] if allow_partial else structure
+        if len(headings) != len(expected) or any(
+            int(block.numbering.get('level') or 0) != item.level
+            for block, item in zip(headings, expected)
+        ):
+            raise ValueError('IR draft section does not preserve its heading structure.')
+
+        for block, item in zip(headings, expected):
+            block.content = item.title
+            block.numbering['level'] = item.level
 
     @staticmethod
     def _normalize_ir_cross_references(  # noqa: C901
@@ -1328,10 +1368,22 @@ class WriterDraftingTools(WriterToolBase):
                 if target not in allowed_targets:
                     raise ValueError(f'Unplanned IR cross-reference {target!r}.')
                 found_targets.add(str(target))
-            if has_internal_ref and (
-                ''.join(span.text for span in block.spans) != block.content
-            ):
-                raise ValueError('IR cross-reference spans must reproduce the complete block content.')
+            if has_internal_ref and ''.join(span.text for span in block.spans) != block.content:
+                cursor = 0
+                complete_spans: List[WriterSpan] = []
+                for span in block.spans:
+                    start = block.content.find(span.text, cursor) if span.text else -1
+                    if start < 0:
+                        raise ValueError(
+                            'IR cross-reference span text must occur in block content in order.'
+                        )
+                    if start > cursor:
+                        complete_spans.append(WriterSpan(text=block.content[cursor:start]))
+                    complete_spans.append(span)
+                    cursor = start + len(span.text)
+                if cursor < len(block.content):
+                    complete_spans.append(WriterSpan(text=block.content[cursor:]))
+                block.spans = complete_spans
 
         missing = [
             str(item.get('target')) for item in references
