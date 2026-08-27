@@ -100,8 +100,8 @@ Requirements:
 - Use references when relevant, but do not copy reference metadata into the document.
 - Do not invent facts that conflict with the writing context.
 - If previous Markdown is provided, maintain continuity and avoid repetition.
-- Use ordinary Markdown paragraphs, lists, quotes, fenced code, tables, images, and
-  subheadings only when they help the requested content.
+- Use ordinary Markdown paragraphs, lists, quotes, fenced code, tables, and images when useful.
+  Never infer headings from expected_blocks; output only those in heading_structure.
 - Use section_instruction.meta.cross_references as the authoritative cross-reference plan.
   Each item's "target" is the exact system key; an image target equals its visual need_id.
   For a required target, use its guidance to link natural, non-empty wording as
