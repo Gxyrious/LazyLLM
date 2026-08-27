@@ -79,8 +79,9 @@ Requirements:
 - Do not output reasoning, analysis, review notes, or <think> tags.
 - Do not output the section title or its heading; the system adds the heading.
 - When heading_structure is present, reproduce every listed descendant heading with its exact
-  title and order, using item.level + 1 as its Markdown heading level. Do not add other headings.
-  An empty list means no subheadings.
+  title and order, using item.level + 1 as its Markdown heading level (for example, level=2
+  means `###`). Begin with the first listed heading. Do not add other headings. When
+  heading_structure is absent or empty, begin directly with prose.
 - Follow the section instruction as a writing plan, not as a list of visible headings.
 - Treat expected_blocks as coverage priorities, not minimum paragraph counts. Combine or
   omit secondary cues when necessary to fit the section budget.
@@ -121,9 +122,8 @@ Previously drafted Markdown (context only; do not review, summarize, or continue
 Current section instruction:
 {section_instruction_json}
 
-Write only the body of the current section now. Begin directly with its finished
-prose and follow the current section instruction even when the previous Markdown
-covers a different section.
+Write only the body of the current section now, following the current section
+instruction even when the previous Markdown covers a different section.
 '''
 
 

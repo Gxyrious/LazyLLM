@@ -880,7 +880,7 @@ class WriterDraftingTools(WriterToolBase):
         body = body.strip()
         if not body:
             raise ValueError('Markdown draft section body must not be empty.')
-        body = self._normalize_markdown_draft_body(body)
+        body = self._normalize_markdown_draft_body(body, instruction.section_title)
         body = self._strip_system_section_anchors(body)
         if not body:
             raise ValueError('Markdown draft section body contains only headings, no content.')
@@ -1181,19 +1181,18 @@ class WriterDraftingTools(WriterToolBase):
         return '\n\n'.join(section.strip() for section in sections if isinstance(section, str))
 
     @staticmethod
-    def _normalize_markdown_draft_body(body: str) -> str:
-        '''Strip leading H1/H2 and downgrade stray H1/H2 to H3.'''
+    def _normalize_markdown_draft_body(body: str, section_title: str) -> str:
+        '''Strip a repeated section heading and downgrade other H1/H2 to H3.'''
         lines = body.split('\n')
         result: List[str] = []
         in_fence = False
-        seen_content = False
+        normalized_section_title = strip_heading_numbering(section_title)
 
         for line in lines:
             stripped = line.strip()
             if stripped[:3] in ('```', '~~~'):
                 in_fence = not in_fence
                 result.append(line)
-                seen_content = True
                 continue
             if in_fence:
                 result.append(line)
@@ -1202,7 +1201,7 @@ class WriterDraftingTools(WriterToolBase):
             m = re.match(r'^(#{1,2})\s+(.+?)\s*$', line)
             if m:
                 title = strip_heading_numbering(m.group(2))
-                if seen_content:
+                if title != normalized_section_title:
                     result.append(f'### {title}')
                 continue
 
@@ -1212,7 +1211,6 @@ class WriterDraftingTools(WriterToolBase):
                     f'{subheading.group(1)} '
                     f'{strip_heading_numbering(subheading.group(2))}'
                 )
-                seen_content = True
                 continue
 
             line = re.sub(
@@ -1221,8 +1219,6 @@ class WriterDraftingTools(WriterToolBase):
                 line,
             )
 
-            if stripped:
-                seen_content = True
             result.append(line)
 
         return '\n'.join(result).strip()
