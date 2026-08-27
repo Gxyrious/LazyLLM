@@ -1094,7 +1094,9 @@ class WriterPlanningTools(WriterToolBase):
             normalized.append({
                 'target': target,
                 'kind': 'image' if target in (visual_targets or set()) else 'section',
-                'required': bool(item.get('required', True)),
+                'required': target not in (visual_targets or set()) and bool(
+                    item.get('required', True)
+                ),
                 'must_create': False,
                 'caption': str(item.get('caption') or '').strip(),
                 'guidance': str(item.get('guidance') or '').strip(),
@@ -1339,6 +1341,7 @@ class WriterPlanningTools(WriterToolBase):
         instruction.section_title = block.content
         instruction.heading_structure = [
             HeadingStructureItem(
+                node_id=node_id_by_original[item.node_id],
                 level=int(item.numbering.get('level') or 1),
                 title=strip_heading_numbering(item.content),
             )

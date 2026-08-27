@@ -25,6 +25,7 @@ class WritingInstructionBase(BaseModel):
 
 
 class HeadingStructureItem(BaseModel):
+    node_id: Optional[str] = None
     level: int = Field(ge=2, le=5)
     title: str = Field(min_length=1)
 

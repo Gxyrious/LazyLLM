@@ -5,8 +5,9 @@ Requirements:
 - Return a single WriterBlock object with stage="draft".
 - The returned block is the section root. Use type="heading" and put the section title in content.
 - The section's actual prose lives in the block's children. Use paragraph blocks for prose.
-- When heading_structure is present, reproduce every listed descendant heading with its exact
-  title, level, and order, and do not add other headings. An empty list means no subheadings.
+- When heading_structure is present, reproduce one descendant heading for every listed item,
+  using its exact title and order. The system assigns node_id and numbering.level. Do not add
+  other headings. An empty list means no subheadings.
 - A paragraph child usually represents one substantial paragraph or paragraph group.
 - The section instruction is a writing plan, not a list of visible headings.
 - Write headings without visible numbering; the system renders numbers.

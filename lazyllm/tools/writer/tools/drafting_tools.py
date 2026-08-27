@@ -1286,6 +1286,7 @@ class WriterDraftingTools(WriterToolBase):
         draft_block.stage = 'draft'
         draft_block.type = 'heading'
         draft_block.content = strip_heading_numbering(instruction.section_title)
+        draft_block.spans = []
         draft_block.numbering['level'] = 1
         for block in draft_block.iter_blocks():
             block.stage = 'draft'
@@ -1317,14 +1318,16 @@ class WriterDraftingTools(WriterToolBase):
             if block is not draft_block and block.type == 'heading'
         ]
         expected = structure[:len(headings)] if allow_partial else structure
-        if len(headings) != len(expected) or any(
-            int(block.numbering.get('level') or 0) != item.level
-            for block, item in zip(headings, expected)
-        ):
+        if len(headings) != len(expected):
             raise ValueError('IR draft section does not preserve its heading structure.')
 
         for block, item in zip(headings, expected):
+            if block.model_extra is not None:
+                block.model_extra.pop('level', None)
+            if item.node_id is not None:
+                block.node_id = item.node_id
             block.content = item.title
+            block.spans = []
             block.numbering['level'] = item.level
 
     @staticmethod
