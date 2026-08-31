@@ -1368,13 +1368,14 @@ class WriterDraftingTools(WriterToolBase):
                     raise ValueError(f'Unplanned IR cross-reference {target!r}.')
                 found_targets.add(str(target))
             if has_internal_ref and ''.join(span.text for span in block.spans) != block.content:
+                block.spans.sort(key=lambda span: block.content.find(span.text))
                 cursor = 0
                 complete_spans: List[WriterSpan] = []
                 for span in block.spans:
                     start = block.content.find(span.text, cursor) if span.text else -1
                     if start < 0:
                         raise ValueError(
-                            'IR cross-reference span text must occur in block content in order.'
+                            'IR cross-reference span text must occur in block content without overlap.'
                         )
                     if start > cursor:
                         complete_spans.append(WriterSpan(text=block.content[cursor:start]))
