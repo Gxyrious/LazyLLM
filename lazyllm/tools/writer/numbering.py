@@ -147,6 +147,11 @@ def decode_anchor_id(anchor: str) -> str:
 def ensure_markdown_heading_anchors(markdown: str) -> str:
     '''Give every numberable Markdown heading a stable hierarchical id.'''
     has_trailing_newline = markdown.endswith('\n')
+    used_anchors = {
+        match.group(1)
+        for match in MARKDOWN_ANCHOR_RE.finditer(markdown)
+        if match.group(1).startswith('block-')
+    }
     output: list[str] = []
     pending_anchors: list[str] = []
     counters: list[int] = []
@@ -184,7 +189,13 @@ def ensure_markdown_heading_anchors(markdown: str) -> str:
                 f'{value:03d}' for value in counters
             )
             if not pending_anchors:
+                while expected in used_anchors:
+                    counters[-1] += 1
+                    expected = 'block-sec-' + '-'.join(
+                        f'{value:03d}' for value in counters
+                    )
                 output.append(f'<a id="{expected}"></a>')
+                used_anchors.add(expected)
             pending_anchors = []
         elif line.strip() and pending_anchors:
             pending_anchors = []

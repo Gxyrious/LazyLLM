@@ -8,6 +8,7 @@ from lazyllm.tools.writer.numbering import (
     build_numbering_view_from_markdown,
     compute_numbering,
     dematerialize_markdown,
+    ensure_markdown_heading_anchors,
     format_target_number,
     materialize_markdown,
 )
@@ -75,6 +76,14 @@ def test_markdown_dematerialization_survives_new_editor_anchor_ids():
         '<a id="block-user-new"></a>',
         '### 时间自动机基础',
     ])
+
+
+def test_generated_markdown_anchor_avoids_existing_id():
+    markdown = ensure_markdown_heading_anchors(
+        '# 标题\n<a id="block-sec-002"></a>\n## 已有锚点\n## 缺少锚点\n'
+    )
+    assert [target.id for target in build_numbering_view_from_markdown(markdown).targets] \
+        == ['sec-002', 'sec-003']
 
 
 def test_parenthesized_style_reaches_roman_heading_levels():
