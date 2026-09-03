@@ -17,7 +17,6 @@ from .serialization import (
     parse_document_markdown,
     parse_markdown_sections,
     parse_markdown_outline_instructions,
-    strip_caption_numbering,
     strip_heading_numbering,
     to_prompt_json,
     validate_markdown_paragraph,
@@ -64,6 +63,5 @@ __all__ = [
     'writer_document_to_lmd',
     'writer_document_to_markdown',
     'strip_heading_numbering',
-    'strip_caption_numbering',
     'parse_writer_request_constraints',
 ]

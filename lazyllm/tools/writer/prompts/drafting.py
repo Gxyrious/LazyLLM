@@ -8,9 +8,14 @@ Requirements:
 - When heading_structure is present, reproduce one descendant heading for every listed item,
   using its exact title and order. The system assigns node_id and numbering.level. Do not add
   other headings. An empty list means no subheadings.
+- A heading_structure item's target_chars is the total prose budget for that heading's subtree.
+  Its direct child heading budgets already sum to it, so never add the parent and child budgets.
+  The section-level target and maximum remain authoritative for the whole section.
 - A paragraph child usually represents one substantial paragraph or paragraph group.
 - The section instruction is a writing plan, not a list of visible headings.
-- Write headings without visible numbering; the system renders numbers.
+- Write headings without visible numbering; the system renders heading numbers.
+- Code blocks and tables are not numbered or cross-reference targets. Do not add standalone
+  captions such as "代码1", "Code 1", "表1", or "Table 1" before them.
 - Use expected_blocks to guide coverage and ordering, but do not copy them verbatim as headings.
 - Treat expected_blocks as priorities, not minimum paragraph counts. Combine or omit
   secondary cues when necessary to fit the section budget.
@@ -36,7 +41,7 @@ Requirements:
 - Fill node_id for the section root and for each child (e.g. draft-<node>-1). The system will normalize ids if needed.
 - section_media lists visual needs and their resolved assets. When a listed asset helps the section,
   insert an independent child WriterBlock with type="image" at the appropriate reading position.
-  Its content is the final Chinese caption and references must contain exactly one
+  Its content is a natural descriptive Chinese caption without a figure number, and references must contain exactly one
   {{"type": "media_asset", "id": "..."}} entry from section_media. Do not invent asset IDs,
   paths, URLs, tokens, placeholders, or image blocks for unresolved needs.
   The image block node_id is both the visual need_id and cross-reference target; its
@@ -82,13 +87,18 @@ Requirements:
   title and order, using item.level + 1 as its Markdown heading level (for example, level=2
   means `###`). Begin with the first listed heading. Do not add other headings. When
   heading_structure is absent or empty, begin directly with prose.
+- A heading_structure item's target_chars is the total prose budget for that heading's subtree.
+  Its direct child heading budgets already sum to it, so never add the parent and child budgets.
+  The section-level target and maximum remain authoritative for the whole section.
 - Follow the section instruction as a writing plan, not as a list of visible headings.
 - Treat expected_blocks as coverage priorities, not minimum paragraph counts. Combine or
   omit secondary cues when necessary to fit the section budget.
 - section_instruction.meta.target_chars is the preferred prose length and
   section_instruction.meta.max_chars is a hard prose limit when present.
 - The length limit takes precedence over exhaustive source coverage or prose expansion.
-- Write headings without visible numbering; the system renders numbers.
+- Write headings without visible numbering; the system renders heading numbers.
+- Code blocks and tables are not numbered or cross-reference targets. Do not add standalone
+  captions such as "代码1", "Code 1", "表1", or "Table 1" before them.
 - Respect required_points, fact_constraints, style_constraints, and relation_constraints.
 - Sections may be drafted independently and in parallel. Treat document-global point of view,
   tense, narrative voice, character identity, and naming constraints as strict. Do not invent a
@@ -172,6 +182,7 @@ Requirements:
   ![concise caption](media-placeholder://<need_id>)
 - Use purpose and placement_hint to choose the caption and location. Do not output unplanned images,
   asset paths, URLs, HTML anchors, or prose links to the image. When short_visuals is empty, output no images.
+- Keep the caption descriptive and do not prefix it with a figure number.
 - Treat expected_blocks as an internal order and coverage guide. Do not copy its entries as headings,
   labels, a checklist, or separately generated fragments.
 - Express core_viewpoint clearly while covering required_points within the available length.

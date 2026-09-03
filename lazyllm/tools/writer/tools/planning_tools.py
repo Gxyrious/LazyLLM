@@ -8,7 +8,13 @@ from ..data_models.context import WritingContext
 from ..data_models.multimodal import VisualPlan
 from ..data_models.resource import ResourceProfile
 from ..data_models.task import WritingTask
-from ..data_models.writer_ir import ContentRef, WriterBlock, WriterDocument
+from ..data_models.writer_ir import (
+    ContentRef,
+    ContextRelation,
+    WritingSubTask,
+    WriterBlock,
+    WriterDocument,
+)
 from ..data_models.planning import (
     HeadingStructureItem,
     SectionInstruction,
@@ -796,6 +802,21 @@ class WriterPlanningTools(WriterToolBase):
             lines.append(line)
         return ensure_markdown_heading_anchors('\n'.join(lines).rstrip() + '\n')
 
+    @classmethod
+    def _complete_markdown_outline_fields(
+        cls,
+        outline: str,
+        task: WritingTask,
+    ) -> str:
+        '''Validate model sidecars and deterministically fill omitted outline fields.'''
+        document = parse_document_markdown(
+            outline,
+            document_id=f'{task.task_id}-outline-markdown',
+            stage='outline',
+        )
+        cls._ensure_outline_fields(document, task)
+        return apply_markdown_outline_instructions(outline, document)
+
     @staticmethod
     def _remove_outline_image_markup(line: str) -> str:
         '''Keep generated outlines structural; visual placement has a separate owner.'''
@@ -1091,7 +1112,7 @@ class WriterPlanningTools(WriterToolBase):
             instruction_list.meta['synthesized_instruction_refs'] = synthesized_refs
 
         outline_id = f'{context.context_id}-outline-markdown'
-        node_id_by_ref = self._markdown_outline_node_ids(targets)
+        node_id_by_ref = self._markdown_outline_node_ids(targets, outline)
         headings_by_ref = self._markdown_heading_structure(outline)
         needs_by_ref = self._markdown_visual_needs_by_ref(visual_plan)
         visual_targets = {
@@ -1208,18 +1229,28 @@ class WriterPlanningTools(WriterToolBase):
     def _markdown_heading_structure(
         outline: str,
     ) -> Dict[tuple[tuple[str, ...], int], List[HeadingStructureItem]]:
-        result: Dict[tuple[tuple[str, ...], int], List[HeadingStructureItem]] = {}
-        current: tuple[tuple[str, ...], int] | None = None
-        for level, heading_path, occurrence, _ in parse_markdown_sections(outline):
-            if level == 2:
-                current = (tuple(heading_path), occurrence)
-                result[current] = []
-            elif level > 2 and current is not None:
-                result[current].append(HeadingStructureItem(
-                    level=level - 1,
-                    title=strip_heading_numbering(heading_path[-1]),
-                ))
-        return result
+        _, targets = get_markdown_outline_targets(outline)
+        document = parse_document_markdown(
+            outline,
+            document_id='markdown-outline-heading-structure',
+            stage='outline',
+        )
+        top_level = [block for block in document.blocks if block.type == 'heading']
+        if len(top_level) != len(targets):
+            raise ValueError('Markdown outline headings could not be mapped to their structure.')
+        return {
+            (tuple(heading_path), occurrence): [
+                HeadingStructureItem(
+                    node_id=item.node_id,
+                    level=int(item.numbering.get('level') or 1),
+                    title=strip_heading_numbering(item.content),
+                    target_chars=item.target_chars,
+                )
+                for item in block.iter_blocks()
+                if item is not block and item.type == 'heading'
+            ]
+            for (_, heading_path, occurrence, _), block in zip(targets, top_level)
+        }
 
     @staticmethod
     def _markdown_visual_needs_by_ref(
@@ -1556,6 +1587,7 @@ class WriterPlanningTools(WriterToolBase):
                 node_id=node_id_by_original[item.node_id],
                 level=int(item.numbering.get('level') or 1),
                 title=strip_heading_numbering(item.content),
+                target_chars=item.target_chars,
             )
             for item in block.iter_blocks()
             if item is not block and item.type == 'heading'

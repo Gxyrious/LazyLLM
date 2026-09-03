@@ -7,7 +7,14 @@ from typing import Any, Dict, List, Optional
 from lazyllm.thirdparty import mistune
 
 from ..data_models.multimodal import MediaAssetLibrary
-from ..data_models.writer_ir import WriterBlock, WriterDocument, WriterSpan, WriterStage
+from ..data_models.writer_ir import (
+    ContextRelation,
+    WritingSubTask,
+    WriterBlock,
+    WriterDocument,
+    WriterSpan,
+    WriterStage,
+)
 from ..numbering import (
     MARKDOWN_ANCHOR_RE,
     parse_markdown_anchor_numbering,
@@ -30,9 +37,6 @@ _NUMBERED_HEADING_RE = re.compile(
     r'|第\s*(?:\d+(?:\.\d+)*|[一二三四五六七八九十百千万零〇两]+)\s*[章节部分篇]\s*[：:、.．]?\s*'
     r'|[一二三四五六七八九十百千万零〇两]+\s*[、.．：:]\s*)'
 )
-_NUMBERED_CAPTION_RE = re.compile(
-    r'^\s*(?:图|表|代码)\s*\d+(?:\.\d+)*\s*[：:.\s]?\s*'
-)
 _INTERNAL_LINK_URL_RE = re.compile(r'^#(?:block-)?[A-Za-z0-9_.:-]+$')
 
 
@@ -40,13 +44,6 @@ def strip_heading_numbering(value: str) -> str:
     '''Remove visible heading numbering from generated/persisted heading text.'''
     text = (value or '').strip()
     match = _NUMBERED_HEADING_RE.match(text)
-    return text[match.end():].strip() if match else text
-
-
-def strip_caption_numbering(value: str) -> str:
-    '''Remove visible float numbering from generated/persisted caption text.'''
-    text = (value or '').strip()
-    match = _NUMBERED_CAPTION_RE.match(text)
     return text[match.end():].strip() if match else text
 
 
@@ -316,9 +313,11 @@ def parse_document_markdown(  # noqa: C901
     media_assets: Optional[MediaAssetLibrary] = None,
 ) -> WriterDocument:
     '''Convert the drafting Markdown subset into the existing WriterDocument IR.'''
-    heading_numbering = parse_markdown_heading_numbering_config(markdown or '')
+    outline_instructions = parse_markdown_outline_instructions(markdown or '')
+    visible_markdown = _strip_markdown_outline_instructions(markdown or '')
+    heading_numbering = parse_markdown_heading_numbering_config(visible_markdown)
     tokens = mistune.create_markdown(renderer='ast', plugins=['table'])(
-        strip_markdown_heading_numbering_config(markdown or ''),
+        strip_markdown_heading_numbering_config(visible_markdown),
     )
     outline_ids: Dict[str, List[str]] = defaultdict(list)
     if outline:

@@ -8,7 +8,7 @@ from typing import Any, Literal, Mapping
 from .data_models.writer_ir import WriterBlock, WriterDocument
 
 
-NumberingKind = Literal['section', 'figure', 'table', 'code']
+NumberingKind = Literal['section', 'figure']
 HeadingNumberingMode = Literal['ordered', 'unordered']
 OrderedHeadingNumberingStyle = Literal['hierarchical', 'chinese', 'parenthesized']
 
@@ -37,7 +37,7 @@ class NumberingView:
 
 @dataclass(frozen=True, slots=True)
 class NumberingEntry:
-    kind: NumberingKind
+    kind: Literal['section']
     number_parts: tuple[int, ...]
     caption: str | None
     label: str = ''
@@ -50,14 +50,6 @@ NumberingMap = dict[str, NumberingEntry]
 _KIND_BY_TYPE = {
     'heading': 'section',
     'image': 'figure',
-    'table': 'table',
-    'code': 'code',
-}
-_LABEL_BY_KIND = {
-    'section': '',
-    'figure': '图',
-    'table': '表',
-    'code': '代码',
 }
 MARKDOWN_ANCHOR_RE = re.compile(
     r'<a\s+id="((?:block-)?[^"]+)"(?:\s+[^>]*)?\s*(?:/\s*>|>\s*</a\s*>)',
@@ -221,7 +213,6 @@ def _markdown_semantic_items(markdown: str):
             marker = fence_match.group(1)[0]
             if fence is None:
                 fence = marker
-                yield index, line, 'code', fence_match.group(2).strip(), pending_anchors
                 pending_anchors = []
             elif fence == marker:
                 fence = None
@@ -242,7 +233,6 @@ def _markdown_semantic_items(markdown: str):
             yield index, line, 'image', image.group(1).strip(), pending_anchors
             pending_anchors = []
         if _is_table_header(lines, index):
-            yield index, line, 'table', '', pending_anchors
             pending_anchors = []
 
 
@@ -429,45 +419,37 @@ def compute_numbering(view: NumberingView) -> NumberingMap:
     counters: list[int] = []
     root_level: int | None = None
     previous_level = 0
-    float_counters = {'figure': 0, 'table': 0, 'code': 0}
 
     for target in view.targets:
-        if target.kind == 'section':
-            raw_level = max(1, int(target.level or 1))
-            if root_level is None:
-                root_level = raw_level
-            level = max(1, raw_level - root_level + 1)
-            # A document cannot start at a nested level or skip a hierarchy.
-            level = min(level, previous_level + 1)
-            mode = target.mode or 'ordered'
-            style = None if mode == 'unordered' else view.ordered_style
+        if target.kind != 'section':
+            continue
+        raw_level = max(1, int(target.level or 1))
+        if root_level is None:
+            root_level = raw_level
+        level = max(1, raw_level - root_level + 1)
+        # A document cannot start at a nested level or skip a hierarchy.
+        level = min(level, previous_level + 1)
+        mode = target.mode or 'ordered'
+        style = None if mode == 'unordered' else view.ordered_style
 
-            if level <= len(counters):
-                counters = counters[:level]
-            if mode == 'ordered':
-                if target.restart:
-                    counters = counters[:level - 1] + [0]
-                    counters.extend([0] * (level - len(counters)))
-                else:
-                    counters.extend([0] * (level - len(counters)))
-                counters[-1] += 1
-                number_parts = tuple(counters)
-                previous_level = level
+        if level <= len(counters):
+            counters = counters[:level]
+        if mode == 'ordered':
+            if target.restart:
+                counters = counters[:level - 1] + [0]
+                counters.extend([0] * (level - len(counters)))
             else:
-                number_parts = ()
+                counters.extend([0] * (level - len(counters)))
+            counters[-1] += 1
+            number_parts = tuple(counters)
+            previous_level = level
         else:
-            float_counters[target.kind] += 1
-            number_parts = (float_counters[target.kind],)
-            mode = None
-            style = None
+            number_parts = ()
         numbering[target.id] = NumberingEntry(
-            kind=target.kind,
+            kind='section',
             number_parts=number_parts,
             caption=target.caption,
-            label=(
-                _format_heading_label(style, number_parts, level)
-                if target.kind == 'section' and style is not None else ''
-            ),
+            label=_format_heading_label(style, number_parts, level) if style is not None else '',
             mode=mode,
             restart=target.restart,
         )
@@ -475,24 +457,19 @@ def compute_numbering(view: NumberingView) -> NumberingMap:
 
 
 def format_target_number(entry: NumberingEntry) -> str:
-    if entry.kind == 'section':
-        if entry.mode == 'unordered':
-            return ''
-        if entry.label:
-            return entry.label
-        return f'{".".join(str(part) for part in entry.number_parts)}.'
-    return f'{_LABEL_BY_KIND[entry.kind]}{entry.number_parts[0]}'
+    if entry.mode == 'unordered':
+        return ''
+    if entry.label:
+        return entry.label
+    return f'{".".join(str(part) for part in entry.number_parts)}.'
 
 
 def materialize_ir(document: WriterDocument, numbering: NumberingMap) -> WriterDocument:
     result = document.model_copy(deep=True)
     for block in _iter_blocks(result.blocks):
         entry = numbering.get(block.node_id)
-        if entry is not None and block.type in {'heading', 'image', 'table', 'code'}:
+        if entry is not None and block.type == 'heading':
             prefix = format_target_number(entry)
-            if block.type == 'code':
-                block.provider_payload['numbering_caption'] = prefix
-                continue
             if prefix:
                 block.content = f'{prefix} {block.content}'
                 if block.spans and block.spans[0].text:
@@ -529,13 +506,6 @@ def materialize_markdown(
             marker = fence_match.group(1)[0]
             if fence is None:
                 fence = marker
-                target = next((
-                    item for item in targets_by_line.get(index, [])
-                    if item.kind == 'code'
-                ), None)
-                if target is not None:
-                    label = format_target_number(numbering[target.id])
-                    output.append(label)
             elif fence == marker:
                 fence = None
             output.append(line)
@@ -543,14 +513,6 @@ def materialize_markdown(
         if fence is not None:
             output.append(line)
             continue
-        if _is_table_header(lines, index):
-            target = next((
-                item for item in targets_by_line.get(index, [])
-                if item.kind == 'table'
-            ), None)
-            if target is not None:
-                label = format_target_number(numbering[target.id])
-                output.append(f'{label} {target.caption or ""}'.strip())
         heading = _HEADING_RE.match(line)
         if heading:
             target = next((
@@ -561,28 +523,6 @@ def materialize_markdown(
                 prefix = format_target_number(numbering[target.id])
                 visible_prefix = f'{prefix} ' if prefix else ''
                 line = f'{heading.group(1)} {visible_prefix}{heading.group(2)}'
-        else:
-            images = list(_IMAGE_RE.finditer(line))
-            targets = [
-                target for target in targets_by_line.get(index, [])
-                if target.kind == 'figure'
-            ]
-            if images and len(images) == len(targets):
-                pieces: list[str] = []
-                last = 0
-                for image, target in zip(images, targets):
-                    caption = image.group(1).strip()
-                    label = format_target_number(numbering[target.id])
-                    replacement = image.group(0).replace(
-                        f'![{image.group(1)}]',
-                        f'![{label} {caption}]',
-                        1,
-                    )
-                    pieces.append(line[last:image.start()])
-                    pieces.append(replacement)
-                    last = image.end()
-                pieces.append(line[last:])
-                line = ''.join(pieces)
         output.append(line)
     return '\n'.join(output)
 
@@ -593,9 +533,8 @@ def dematerialize_ir(
 ) -> WriterDocument:
     result = document.model_copy(deep=True)
     for block in _iter_blocks(result.blocks):
-        block.provider_payload.pop('numbering_caption', None)
         entry = base_numbering.get(block.node_id)
-        if entry is not None and _KIND_BY_TYPE.get(block.type) == entry.kind:
+        if entry is not None and block.type == 'heading':
             number = format_target_number(entry)
             prefix = f'{number} ' if number else ''
             if prefix and block.content.startswith(prefix):
@@ -639,18 +578,6 @@ def dematerialize_markdown(markdown: str, base_numbering: NumberingMap | None = 
             output.append(line)
             continue
 
-        next_targets = targets_by_line.get(index + 1, [])
-        if len(next_targets) == 1 and next_targets[0].kind in {'table', 'code'}:
-            entry = entry_for(next_targets[0])
-            if entry is not None and entry.kind == next_targets[0].kind:
-                caption = (
-                    format_target_number(entry)
-                    if next_targets[0].kind == 'code'
-                    else f'{format_target_number(entry)} {entry.caption or ""}'.strip()
-                )
-                if line == caption:
-                    continue
-
         heading = _HEADING_RE.match(line)
         if heading:
             targets = targets_by_line.get(index, [])
@@ -666,33 +593,6 @@ def dematerialize_markdown(markdown: str, base_numbering: NumberingMap | None = 
                 if prefix and title.startswith(prefix):
                     title = title[len(prefix):]
                 line = f'{heading.group(1)} {title}'.rstrip()
-        else:
-            images = list(_IMAGE_RE.finditer(line))
-            targets = [
-                target for target in targets_by_line.get(index, [])
-                if target.kind == 'figure'
-            ]
-            if images and len(images) == len(targets):
-                pieces: list[str] = []
-                last = 0
-                for image, target in zip(images, targets):
-                    replacement = image.group(0)
-                    entry = entry_for(target)
-                    prefix = (
-                        f'{format_target_number(entry)} '
-                        if entry is not None and entry.kind == target.kind
-                        else None
-                    )
-                    if prefix and image.group(1).startswith(prefix):
-                        replacement = replacement.replace(
-                            f'![{image.group(1)}]',
-                            f'![{image.group(1)[len(prefix):]}]',
-                            1,
-                        )
-                    pieces.extend((line[last:image.start()], replacement))
-                    last = image.end()
-                pieces.append(line[last:])
-                line = ''.join(pieces)
         output.append(line)
     return '\n'.join(output)
 

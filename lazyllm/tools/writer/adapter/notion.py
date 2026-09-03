@@ -15,7 +15,7 @@ from ..data_models.writer_ir import (
     WriterSpan,
     WriterStage,
 )
-from ..utils import strip_caption_numbering, strip_heading_numbering
+from ..utils import strip_heading_numbering
 from .base import NativeBlock, NativePatchOperation, WriterAdapterBase
 
 
@@ -392,60 +392,6 @@ class NotionWriterAdapter(WriterAdapterBase):
             raise ValueError(f'patch target node does not exist: {patch.target_node_id!r}.')
         if patch.block is None:
             raise ValueError('update patch must provide block.')
-        if current.type == 'image' \
-                and patch.meta.get('source') == 'system_numbering' \
-                and patch.meta.get('update_scope') == 'caption':
-            if patch.block.type != 'image':
-                raise ValueError('system image numbering cannot change the block type.')
-            block_id = current.provider_binding.get('block_id')
-            if not isinstance(block_id, str) or not block_id:
-                raise ValueError('Notion image update target is missing its block_id binding.')
-            desired = current.model_copy(deep=True)
-            desired.content = patch.block.content
-            desired.spans = deepcopy(patch.block.spans)
-            return NativePatchOperation(
-                operation='update',
-                params={
-                    'block_id': block_id,
-                    'block': {
-                        'object': 'block',
-                        'type': 'image',
-                        'image': {
-                            'caption': self._spans_to_rich_text(desired, lambda _span: None),
-                        },
-                    },
-                },
-            )
-        if current.type == 'code' \
-                and patch.meta.get('source') == 'system_numbering' \
-                and patch.meta.get('update_scope') == 'caption':
-            if patch.block.type != 'code':
-                raise ValueError('system code numbering cannot change the block type.')
-            block_id = current.provider_binding.get('block_id')
-            if not isinstance(block_id, str) or not block_id:
-                raise ValueError('Notion code update target is missing its block_id binding.')
-            caption = str(
-                patch.block.provider_payload.get('numbering_caption') or '').strip()
-            caption_block = WriterBlock(
-                node_id=patch.block.node_id,
-                type='paragraph',
-                content=caption,
-                spans=[WriterSpan(text=caption)] if caption else [],
-            )
-            return NativePatchOperation(
-                operation='update',
-                params={
-                    'block_id': block_id,
-                    'block': {
-                        'object': 'block',
-                        'type': 'code',
-                        'code': {
-                            'caption': self._spans_to_rich_text(
-                                caption_block, lambda _span: None),
-                        },
-                    },
-                },
-            )
         if not current.editable:
             raise ValueError(f'Notion block {patch.target_node_id!r} does not support updates.')
 
@@ -782,11 +728,6 @@ class NotionWriterAdapter(WriterAdapterBase):
                 spans[0].text = strip_heading_numbering(spans[0].text)
         elif block_type in {'bulleted_list_item', 'numbered_list_item'}:
             numbering['ordered'] = block_type == 'numbered_list_item'
-        if block_type == 'image':
-            content = strip_caption_numbering(content)
-            if spans and spans[0].text:
-                spans[0].text = strip_caption_numbering(spans[0].text)
-
         binding: Dict[str, Any] = {
             'provider': self.provider,
             'document_id': external_document_id,

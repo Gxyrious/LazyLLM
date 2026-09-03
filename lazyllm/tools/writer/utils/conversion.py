@@ -680,7 +680,7 @@ def _render_block(block: WriterBlock, depth: int, allow_raw: bool) -> str:
     anchor = (
         f'<a id="block-{block.node_id}"'
         f'{format_markdown_anchor_numbering(block.numbering)}></a>'
-        if block.type in {'heading', 'image', 'table', 'code'}
+        if block.type in {'heading', 'image'}
         else ''
     )
     if block.type == 'heading':
@@ -704,8 +704,7 @@ def _render_block(block: WriterBlock, depth: int, allow_raw: bool) -> str:
             info = f'{language}{(" " + meta) if meta else ""}'
             fence = _code_fence(block.content)
             code = f'{fence}{info}\n{block.content}\n{fence}'
-        caption = str(block.provider_payload.get('numbering_caption') or '').strip()
-        current = '\n'.join(filter(None, [caption, code]))
+        current = code
     elif block.type == 'divider':
         current = block.content.strip() if re.fullmatch(r'(?:[-*_]\s*){3,}', block.content.strip()) else '---'
     elif block.type == 'image':

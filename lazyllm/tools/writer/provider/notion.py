@@ -260,11 +260,7 @@ class NotionWriterProvider(WriterProviderBase):
         }
         hunks = []
         for current in persisted_document.iter_blocks():
-            # Notion headings have visible rich text and images/code blocks have
-            # captions. Native table blocks do not expose a caption, so table
-            # numbering cannot be synchronized without inserting a synthetic
-            # paragraph next to the table.
-            if current.type not in {'heading', 'image', 'code'}:
+            if current.type != 'heading':
                 continue
             expected = expected_by_id.get(current.node_id)
             if expected is None or expected.type != current.type:
@@ -272,22 +268,17 @@ class NotionWriterProvider(WriterProviderBase):
             expected_text = cls._expected_numbering_text(expected)
             if cls._native_visible_text(current) == expected_text:
                 continue
-            meta = {'source': 'system_numbering'}
-            if current.type in {'image', 'code'}:
-                meta['update_scope'] = 'caption'
             hunks.append(PatchHunk(
                 hunk_id=f'{current.type}-numbering-sync-{current.node_id}',
                 target_node_id=current.node_id,
                 modify_type='update',
                 block=expected.model_copy(deep=True),
-                meta=meta,
+                meta={'source': 'system_numbering'},
             ))
         return hunks
 
     @staticmethod
     def _expected_numbering_text(block: Any) -> str:
-        if block.type == 'code':
-            return str(block.provider_payload.get('numbering_caption') or '')
         return block.content
 
     @staticmethod
@@ -297,8 +288,7 @@ class NotionWriterProvider(WriterProviderBase):
         payload = raw.get(block_type) if isinstance(block_type, str) else None
         if not isinstance(payload, dict):
             return block.content
-        rich_text = payload.get(
-            'caption' if block.type in {'image', 'code'} else 'rich_text')
+        rich_text = payload.get('rich_text')
         if not isinstance(rich_text, list):
             return block.content
         values: List[str] = []

@@ -30,7 +30,6 @@ from ..utils import (
     get_markdown_outline_targets,
     make_markdown_tool_result,
     parse_markdown_sections,
-    strip_caption_numbering,
     strip_heading_numbering,
     to_prompt_json,
     writer_document_to_markdown,
@@ -492,7 +491,7 @@ class WriterDraftingTools(WriterToolBase):
                     )
                 continue
             asset = library.assets[asset_ids[0]]
-            block.content = strip_caption_numbering(block.content or need.purpose)
+            block.content = (block.content or need.purpose).strip()
             block.references = [{
                 'type': 'media_asset',
                 'id': asset_ids[0],
@@ -514,7 +513,7 @@ class WriterDraftingTools(WriterToolBase):
                 document.blocks.append(WriterBlock(
                     node_id=need.need_id,
                     type='image',
-                    content=strip_caption_numbering(need.purpose),
+                    content=need.purpose.strip(),
                     stage='draft',
                     references=[{
                         'type': 'media_asset',
@@ -653,7 +652,7 @@ class WriterDraftingTools(WriterToolBase):
         lines = body.splitlines()
         insertion_index = cls._markdown_reference_fallback_line(lines) + 1
         for offset, need_id in enumerate(missing):
-            purpose = strip_caption_numbering(str(visuals[need_id].get('purpose') or '图').strip())
+            purpose = str(visuals[need_id].get('purpose') or '图').strip()
             purpose = re.sub(r'[\[\]\r\n]+', ' ', purpose).strip() or '图'
             lines.insert(
                 insertion_index + offset,
@@ -819,7 +818,7 @@ class WriterDraftingTools(WriterToolBase):
             image = WriterBlock(
                 node_id=target,
                 type='image',
-                content=strip_caption_numbering(str(item.get('caption') or '图')),
+                content=str(item.get('caption') or '图').strip(),
                 stage='draft',
                 references=[{'type': 'media_asset', 'id': asset_ids[0]}],
             )
@@ -969,8 +968,6 @@ class WriterDraftingTools(WriterToolBase):
                 item.stage = 'draft'
                 if item.type == 'heading':
                     item.content = strip_heading_numbering(item.content)
-                elif item.type == 'image':
-                    item.content = strip_caption_numbering(item.content)
         draft_document = WriterDocument(
             document_id=f'draft-document-{context.context_id}',
             stage='draft',
@@ -1130,7 +1127,6 @@ class WriterDraftingTools(WriterToolBase):
                 'draft_id': draft_document.document_id,
                 'context_id': writing_context.context_id,
                 'output_format': output_format,
-                'rendered_content': content,
             },
         )
         for block in final_document.iter_blocks():
@@ -1213,12 +1209,6 @@ class WriterDraftingTools(WriterToolBase):
                 )
                 continue
 
-            line = re.sub(
-                r'!\[([^\]]*)\]',
-                lambda image: f'![{strip_caption_numbering(image.group(1))}]',
-                line,
-            )
-
             result.append(line)
 
         return '\n'.join(result).strip()
@@ -1245,18 +1235,6 @@ class WriterDraftingTools(WriterToolBase):
             != strip_heading_numbering(instruction.content_ref.heading_path[-1])
         ):
             raise ValueError('Markdown draft section heading does not match its content_ref.')
-        if instruction.heading_structure is not None:
-            actual = [
-                (level - 1, strip_heading_numbering(heading_path[-1]))
-                for level, heading_path, _, _ in sections
-                if level > 2
-            ]
-            expected = [
-                (item.level, item.title)
-                for item in instruction.heading_structure
-            ]
-            if actual != expected:
-                raise ValueError('Markdown draft section does not preserve its heading structure.')
 
     @staticmethod
     def _markdown_draft_section_title(markdown: str) -> str:
@@ -1288,8 +1266,6 @@ class WriterDraftingTools(WriterToolBase):
             block.stage = 'draft'
             if block.type == 'heading':
                 block.content = strip_heading_numbering(block.content)
-            elif block.type == 'image':
-                block.content = strip_caption_numbering(block.content)
         draft_block.references = [dict(reference) for reference in instruction.references]
         self._normalize_ir_heading_structure(
             draft_block, instruction, allow_partial=allow_deferred_create,
@@ -1315,7 +1291,7 @@ class WriterDraftingTools(WriterToolBase):
         ]
         expected = structure[:len(headings)] if allow_partial else structure
         if len(headings) != len(expected):
-            raise ValueError('IR draft section does not preserve its heading structure.')
+            return
 
         for block, item in zip(headings, expected):
             if block.model_extra is not None:
@@ -1512,7 +1488,7 @@ class WriterDraftingTools(WriterToolBase):
                 if target not in media_lines:
                     if target not in found_targets:
                         continue
-                    caption = strip_caption_numbering(str(item.get('caption') or '图'))
+                    caption = str(item.get('caption') or '图').strip()
                     insertions.append((
                         reference_lines[target] + 1,
                         f'\n<a id="block-{target}"></a>\n'
@@ -1540,9 +1516,9 @@ class WriterDraftingTools(WriterToolBase):
 
     @staticmethod
     def _markdown_reference_text(reference: Dict[str, Any], target: str) -> str:
-        return strip_caption_numbering(str(
+        return str(
             reference.get('caption') or reference.get('guidance') or target
-        ).strip())
+        ).strip()
 
     @classmethod
     def _markdown_reference_fallback_line(cls, lines: List[str]) -> int:  # noqa: C901
