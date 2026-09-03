@@ -356,8 +356,11 @@ class WriterMultimodalTools(WriterToolBase):
     ) -> tuple[List[tuple[InputResource, MediaAsset]], List[str]]:
         provider = str(document.provider_binding.get('provider') or '').lower()
         image_blocks = [block for block in document.iter_blocks() if block.type == 'image']
-        if not image_blocks or provider != 'feishu':
+        if not image_blocks or provider not in {'feishu', 'wechat'}:
             return [], []
+
+        if provider == 'wechat':
+            return self._materialize_wechat_document_images(document)
 
         locator = str(
             document.provider_binding.get('uri')
@@ -402,6 +405,54 @@ class WriterMultimodalTools(WriterToolBase):
             except Exception as exc:
                 warnings.append(
                     f'Failed to download Feishu image {block_id!r}: '
+                    f'{type(exc).__name__}: {exc}'
+                )
+        return collected, warnings
+
+    def _materialize_wechat_document_images(
+        self,
+        document: WriterDocument,
+    ) -> tuple[List[tuple[InputResource, MediaAsset]], List[str]]:
+        """Download WeChat draft images so rewritten documents can reuse them."""
+        collected: List[tuple[InputResource, MediaAsset]] = []
+        warnings: List[str] = []
+        for block in (item for item in document.iter_blocks() if item.type == 'image'):
+            reference = next(
+                (
+                    ref for ref in block.references
+                    if ref.get('type') == 'wechat_image'
+                    and str(ref.get('url') or '').strip()
+                ),
+                None,
+            )
+            url = str(reference.get('url') or '').strip() if reference else ''
+            if not url:
+                warnings.append(f'WeChat image block {block.node_id!r} has no image URL.')
+                continue
+            resource = InputResource(
+                resource_id=f'wechat-image-{block.node_id}',
+                resource_type='image',
+                uri=url,
+                title=block.content or f'WeChat image {block.node_id}',
+                summary=block.content or None,
+                meta={
+                    'provider': 'wechat',
+                    'provider_block_id': block.node_id,
+                    'source_type': 'input_resource',
+                    'origin': 'source_document',
+                    'caption': block.content or None,
+                },
+            )
+            try:
+                asset = self._materialize_image_bytes(
+                    self._download_external_image(url),
+                    resource,
+                    suffix_hint=Path(urlparse(url).path).suffix,
+                )
+                collected.append((resource, asset))
+            except Exception as exc:
+                warnings.append(
+                    f'Failed to download WeChat image {block.node_id!r}: '
                     f'{type(exc).__name__}: {exc}'
                 )
         return collected, warnings

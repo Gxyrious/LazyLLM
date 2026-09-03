@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from html import escape, unescape
 from html.parser import HTMLParser
@@ -24,6 +24,84 @@ _TABLE_MARKDOWN = mistune.create_markdown(escape=True, plugins=['table'])
 _VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
 _KNOWN_INLINE_TAGS = {'a', 'b', 'br', 'code', 'del', 'em', 'i', 's', 'span', 'strong', 'sub', 'sup', 'u'}
 _KNOWN_BLOCK_TAGS = {'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'img', 'ol', 'p', 'pre', 'table', 'ul'}
+
+# WeChat's draft editor does not consistently apply browser-default semantic
+# styles. Keep the fallback theme small and provider-local; documents that were
+# read from WeChat prefer their own source styles below.
+_WECHAT_HEADING_STYLE_PROFILE: dict[int, dict[str, str]] = {
+    1: {
+        'font-size': '20px',
+        'font-weight': '700',
+        'line-height': '1.6',
+        'margin': '24px 0 12px',
+    },
+    2: {
+        'font-size': '18px',
+        'font-weight': '700',
+        'line-height': '1.6',
+        'margin': '20px 0 10px',
+    },
+    3: {
+        'font-size': '16px',
+        'font-weight': '700',
+        'line-height': '1.6',
+        'margin': '16px 0 8px',
+    },
+}
+
+_WECHAT_CAPTION_STYLE_PROFILE: dict[str, str] = {
+    'color': '#6b7280',
+    'font-size': '13px',
+    'line-height': '1.6',
+    'margin': '8px 0 18px',
+    'text-align': 'center',
+}
+
+_WECHAT_SAFE_CSS_PROPERTIES = frozenset({
+    'background-color',
+    'border',
+    'border-bottom',
+    'border-left',
+    'border-right',
+    'border-top',
+    'border-radius',
+    'color',
+    'display',
+    'font-family',
+    'font-size',
+    'font-style',
+    'font-weight',
+    'letter-spacing',
+    'line-height',
+    'margin',
+    'margin-bottom',
+    'margin-left',
+    'margin-right',
+    'margin-top',
+    'max-height',
+    'max-width',
+    'min-height',
+    'min-width',
+    'object-fit',
+    'opacity',
+    'padding',
+    'padding-bottom',
+    'padding-left',
+    'padding-right',
+    'padding-top',
+    'text-align',
+    'text-decoration',
+    'text-indent',
+    'vertical-align',
+    'white-space',
+    'width',
+    'height',
+})
+
+_WECHAT_SAFE_IMAGE_ATTRIBUTES = frozenset({
+    'alt', 'align', 'class', 'height', 'id', 'src', 'style', 'title', 'width',
+})
+_WECHAT_SAFE_WRAPPER_ATTRIBUTES = frozenset({'class', 'id', 'style', 'title'})
 
 
 class _HtmlNode:
@@ -127,6 +205,72 @@ class _WeChatHTMLParser(HTMLParser):
 
 def _html_raw(source: str, node: _HtmlNode) -> str:
     return source[node.start:node.end]
+
+
+def _sanitize_css(value: Any) -> str:
+    """Keep a conservative, deterministic subset of source CSS declarations."""
+    css = str(value or '').strip()
+    if not css:
+        return ''
+    declarations: list[str] = []
+    for declaration in css.split(';'):
+        if ':' not in declaration:
+            continue
+        key, raw_value = declaration.split(':', 1)
+        key = key.strip().lower()
+        raw_value = raw_value.strip()
+        if not key or not raw_value or key not in _WECHAT_SAFE_CSS_PROPERTIES:
+            continue
+        lowered = raw_value.lower()
+        if any(token in lowered for token in ('expression(', 'javascript:', 'vbscript:', 'url(')):
+            continue
+        declarations.append(f'{key}:{raw_value}')
+    return ';'.join(declarations)
+
+
+def _style_text(style: Mapping[str, Any] | str | None) -> str:
+    if isinstance(style, str):
+        return _sanitize_css(style)
+    if not isinstance(style, Mapping):
+        return ''
+    declarations = [
+        f'{str(key).strip().lower()}:{str(value).strip()}'
+        for key, value in style.items()
+        if str(key).strip().lower() in _WECHAT_SAFE_CSS_PROPERTIES
+        and str(value).strip()
+    ]
+    return _sanitize_css(';'.join(declarations))
+
+
+def _serialize_attrs(
+    attrs: Mapping[str, Any] | None,
+    *,
+    allowed: frozenset[str],
+    overrides: Mapping[str, Any] | None = None,
+) -> str:
+    """Serialize a small safe attribute subset for regenerated provider HTML."""
+    values = {
+        str(key).lower(): str(value or '').strip()
+        for key, value in (attrs.items() if isinstance(attrs, Mapping) else [])
+        if (
+            (str(key).lower() in allowed or str(key).lower().startswith('data-'))
+            and str(value or '').strip()
+        )
+    }
+    if overrides:
+        values.update({
+            str(key).lower(): str(value or '').strip()
+            for key, value in overrides.items()
+            if str(key).lower() in allowed and str(value or '').strip()
+        })
+    if 'style' in values:
+        values['style'] = _sanitize_css(values['style'])
+        if not values['style']:
+            values.pop('style')
+    return ''.join(
+        f' {key}="{escape(value, quote=True)}"'
+        for key, value in values.items()
+    )
 
 
 def _element_children(node: _HtmlNode) -> list[_HtmlNode]:
@@ -236,6 +380,39 @@ def _document_snapshot(document: WriterDocument) -> list[dict[str, Any]]:
     return [_source_snapshot(block) for block in document.blocks]
 
 
+def _heading_style_map(blocks: Iterable[WriterBlock]) -> dict[str, str]:
+    styles: dict[str, str] = {}
+    for root in blocks:
+        for block in root.iter_blocks():
+            if block.type != 'heading':
+                continue
+            style = _style_text(block.provider_payload.get('wechat_heading_style'))
+            if not style:
+                continue
+            level = block.provider_payload.get('wechat_heading_level')
+            if not isinstance(level, int) or isinstance(level, bool):
+                level = int(block.numbering.get('level') or 1)
+            styles.setdefault(str(max(1, min(5, level))), style)
+    return styles
+
+
+def _caption_style(blocks: Iterable[WriterBlock]) -> str:
+    for root in blocks:
+        for block in root.iter_blocks():
+            if block.type != 'image':
+                continue
+            caption = block.provider_payload.get('wechat_image_caption')
+            if (
+                not isinstance(caption, Mapping)
+                or not isinstance(caption.get('attrs'), Mapping)
+            ):
+                continue
+            style = _style_text(caption['attrs'].get('style'))
+            if style:
+                return style
+    return ''
+
+
 def _raw_if_unchanged(block: WriterBlock) -> str | None:
     raw = block.provider_payload.get('raw_html')
     snapshot = block.provider_payload.get('source_snapshot')
@@ -342,6 +519,8 @@ class WeChatWriterAdapter(WriterAdapterBase):
             metadata={
                 'source_block_count': len(blocks),
                 'wechat_html_source': source,
+                'wechat_heading_styles': _heading_style_map(blocks),
+                'wechat_caption_style': _caption_style(blocks),
             },
             provider_binding=binding,
             ui_editable=False,
@@ -381,6 +560,11 @@ class WeChatWriterAdapter(WriterAdapterBase):
         raw_html = _html_raw(source, node)
         semantic, payload_node = self._semantic_node(node)
         source_number_label: str | None = None
+        source_heading_style = ''
+        source_heading_level: int | None = None
+        source_image_attrs: dict[str, str] = {}
+        source_image_wrapper: dict[str, Any] = {}
+        source_image_caption: dict[str, Any] = {}
         if semantic == 'p':
             children = _element_children(payload_node)
             if len(children) == 1 and children[0].tag == 'img':
@@ -399,7 +583,9 @@ class WeChatWriterAdapter(WriterAdapterBase):
                     source_number_label = ''
                 if spans:
                     spans[0].text = strip_heading_numbering(spans[0].text)
-                numbering['level'] = max(1, min(5, int(semantic[1:]) - 1))
+                source_heading_level = max(1, min(5, int(semantic[1:]) - 1))
+                numbering['level'] = source_heading_level
+                source_heading_style = _sanitize_css(payload_node.attrs.get('style', ''))
             block = WriterBlock(
                 node_id=node_id,
                 type=block_type,
@@ -410,12 +596,21 @@ class WeChatWriterAdapter(WriterAdapterBase):
                 stage=stage,
             )
         elif semantic == 'img':
-            image_url = payload_node.attrs.get('src', '')
+            image_url = (
+                payload_node.attrs.get('src')
+                or payload_node.attrs.get('data-src')
+                or payload_node.attrs.get('data-original')
+                or ''
+            )
             caption = ''
             if node.tag in {'section', 'div', 'article', 'figure'}:
                 children = _element_children(node)
                 if len(children) == 2 and children[0].tag == 'img':
                     caption = _node_text(children[1])
+                    source_image_caption = {
+                        'tag': children[1].tag,
+                        'attrs': dict(children[1].attrs),
+                    }
             content = caption
             block = WriterBlock(
                 node_id=node_id,
@@ -428,6 +623,12 @@ class WeChatWriterAdapter(WriterAdapterBase):
                 }],
                 stage=stage,
             )
+            source_image_attrs = dict(payload_node.attrs)
+            if node.tag in {'section', 'div', 'article', 'figure'}:
+                source_image_wrapper = {
+                    'tag': node.tag,
+                    'attrs': dict(node.attrs),
+                }
         elif semantic == 'pre':
             code_node = next((child for child in payload_node.children if child.tag == 'code'), None)
             content = _node_text(code_node or payload_node)
@@ -479,6 +680,16 @@ class WeChatWriterAdapter(WriterAdapterBase):
         }
         if source_number_label is not None:
             block.provider_payload['source_number_label'] = source_number_label
+        if source_heading_style:
+            block.provider_payload['wechat_heading_style'] = source_heading_style
+        if source_heading_level is not None:
+            block.provider_payload['wechat_heading_level'] = source_heading_level
+        if source_image_attrs:
+            block.provider_payload['wechat_image_attrs'] = source_image_attrs
+        if source_image_wrapper:
+            block.provider_payload['wechat_image_wrapper'] = source_image_wrapper
+        if source_image_caption:
+            block.provider_payload['wechat_image_caption'] = source_image_caption
         return block
 
     def _parse_list_items(
@@ -580,13 +791,31 @@ class WeChatWriterAdapter(WriterAdapterBase):
             return source
         images = image_urls or {}
         numbering = compute_numbering(build_numbering_view_from_ir(document))
-        return ''.join(self._render_sequence(document.blocks, images, numbering))
+        metadata_styles = document.metadata.get('wechat_heading_styles')
+        if not isinstance(metadata_styles, Mapping):
+            metadata_styles = {}
+        heading_styles: dict[str, str] = {}
+        for key, value in metadata_styles.items():
+            style = _style_text(value)
+            if style:
+                heading_styles[str(key)] = style
+        heading_styles.update(_heading_style_map(document.blocks))
+        caption_style = _style_text(document.metadata.get('wechat_caption_style'))
+        if not caption_style:
+            caption_style = _caption_style(document.blocks)
+        if not caption_style:
+            caption_style = _style_text(_WECHAT_CAPTION_STYLE_PROFILE)
+        return ''.join(self._render_sequence(
+            document.blocks, images, numbering, heading_styles, caption_style,
+        ))
 
     def _render_sequence(
         self,
         blocks: list[WriterBlock],
         images: dict[str, str],
         numbering: dict[str, NumberingEntry],
+        heading_styles: Mapping[str, str],
+        caption_style: str,
     ) -> list[str]:
         rendered: list[str] = []
         index = 0
@@ -600,13 +829,17 @@ class WeChatWriterAdapter(WriterAdapterBase):
                     if item.type != 'list_item' or bool(item.numbering.get('ordered')) != ordered:
                         break
                     body = self._render_inline(item)
-                    children = ''.join(self._render_sequence(item.children, images, numbering))
+                    children = ''.join(self._render_sequence(
+                        item.children, images, numbering, heading_styles, caption_style,
+                    ))
                     items.append(f'<li>{body}{children}</li>')
                     index += 1
                 tag = 'ol' if ordered else 'ul'
                 rendered.append(f'<{tag}>{"".join(items)}</{tag}>')
                 continue
-            rendered.append(self._render_block(block, images, numbering))
+            rendered.append(self._render_block(
+                block, images, numbering, heading_styles, caption_style,
+            ))
             index += 1
         return rendered
 
@@ -615,6 +848,8 @@ class WeChatWriterAdapter(WriterAdapterBase):
         block: WriterBlock,
         images: dict[str, str],
         numbering: dict[str, NumberingEntry],
+        heading_styles: Mapping[str, str],
+        caption_style: str,
     ) -> str:
         entry = numbering.get(block.node_id)
         label = format_target_number(entry) if entry is not None else ''
@@ -633,14 +868,34 @@ class WeChatWriterAdapter(WriterAdapterBase):
             raise ValueError(
                 f'Unsupported WeChat HTML block {block.node_id!r} cannot be modified.')
         if block.type == 'wechat_list':
-            return self._render_list(block, images, numbering)
+            return self._render_list(
+                block, images, numbering, heading_styles, caption_style,
+            )
         body = self._render_inline(block)
-        children = ''.join(self._render_sequence(block.children, images, numbering))
+        children = ''.join(self._render_sequence(
+            block.children, images, numbering, heading_styles, caption_style,
+        ))
         if block.type == 'heading':
             level = int(block.numbering.get('level') or 1)
             heading = min(max(level + 1, 2), 4)
             title = f'{escape(label)} {body}'.strip()
-            return f'<h{heading}>{title}</h{heading}>{children}'
+            style = _style_text(block.provider_payload.get('wechat_heading_style'))
+            source_level = block.provider_payload.get('wechat_heading_level')
+            if (
+                style
+                and isinstance(source_level, int)
+                and not isinstance(source_level, bool)
+                and source_level != level
+            ):
+                style = ''
+            if not style:
+                style = heading_styles.get(str(max(1, min(5, level))), '')
+            if not style:
+                style = _style_text(_WECHAT_HEADING_STYLE_PROFILE[
+                    min(3, max(1, level))
+                ])
+            style_attr = f' style="{escape(style, quote=True)}"' if style else ''
+            return f'<h{heading}{style_attr}>{title}</h{heading}>{children}'
         if block.type == 'image':
             asset_id = next((
                 str(ref.get('id')) for ref in block.references
@@ -653,14 +908,49 @@ class WeChatWriterAdapter(WriterAdapterBase):
             if not url:
                 raise ValueError(f'Image block {block.node_id!r} media is unavailable.')
             caption_text = block.content.strip()
+            caption_config = block.provider_payload.get('wechat_image_caption')
+            caption_tag = 'p'
+            caption_attrs: Mapping[str, Any] = {}
+            if isinstance(caption_config, Mapping):
+                candidate_tag = str(caption_config.get('tag') or '').lower()
+                if candidate_tag in {'p', 'figcaption'}:
+                    caption_tag = candidate_tag
+                if isinstance(caption_config.get('attrs'), Mapping):
+                    caption_attrs = caption_config['attrs']
+            if not _style_text(caption_attrs.get('style')):
+                caption_attrs = {**caption_attrs, 'style': caption_style}
+            caption_attrs_html = _serialize_attrs(
+                caption_attrs,
+                allowed=_WECHAT_SAFE_WRAPPER_ATTRIBUTES,
+            )
             caption = (
-                f'<p>{escape(caption_text)}</p>'
+                f'<{caption_tag}{caption_attrs_html}>'
+                f'{escape(caption_text)}</{caption_tag}>'
                 if caption_text else ''
             )
+            image_attrs = block.provider_payload.get('wechat_image_attrs')
+            image_attrs_html = _serialize_attrs(
+                image_attrs,
+                allowed=_WECHAT_SAFE_IMAGE_ATTRIBUTES,
+                overrides={'src': url},
+            )
+            image_tag = f'<img{image_attrs_html} />'
+            wrapper = block.provider_payload.get('wechat_image_wrapper')
+            wrapper_tag = 'section'
+            wrapper_attrs: Mapping[str, Any] = {}
+            if isinstance(wrapper, Mapping):
+                candidate_tag = str(wrapper.get('tag') or '').lower()
+                if candidate_tag in {'section', 'div', 'article', 'figure'}:
+                    wrapper_tag = candidate_tag
+                if isinstance(wrapper.get('attrs'), Mapping):
+                    wrapper_attrs = wrapper['attrs']
+            wrapper_attrs_html = _serialize_attrs(
+                wrapper_attrs,
+                allowed=_WECHAT_SAFE_WRAPPER_ATTRIBUTES,
+            )
             return (
-                f'<section>'
-                f'<img src="{escape(url, quote=True)}" />'
-                f'{caption}</section>{children}'
+                f'<{wrapper_tag}{wrapper_attrs_html}>'
+                f'{image_tag}{caption}</{wrapper_tag}>{children}'
             )
         if block.type == 'table':
             return f'{self._render_table(block.content)}{children}'
@@ -679,6 +969,8 @@ class WeChatWriterAdapter(WriterAdapterBase):
         block: WriterBlock,
         images: dict[str, str],
         numbering: dict[str, NumberingEntry],
+        heading_styles: Mapping[str, str],
+        caption_style: str,
     ) -> str:
         tag = 'ol' if block.numbering.get('ordered') else 'ul'
         items: list[str] = []
@@ -686,7 +978,9 @@ class WeChatWriterAdapter(WriterAdapterBase):
             if item.type != 'list_item':
                 raise ValueError(f'WeChat list contains invalid child {item.type!r}.')
             body = self._render_inline(item)
-            children = ''.join(self._render_sequence(item.children, images, numbering))
+            children = ''.join(self._render_sequence(
+                item.children, images, numbering, heading_styles, caption_style,
+            ))
             items.append(f'<li>{body}{children}</li>')
         return f'<{tag}>{"".join(items)}</{tag}>'
 

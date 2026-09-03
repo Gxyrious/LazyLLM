@@ -156,10 +156,12 @@ def test_wechat_draft_create_then_update(monkeypatch, tmp_path: Path):
     assert calls['updated'][1] == 0
     article = calls['updated'][2]
     assert article['thumb_media_id'] == 'cover-media'
-    assert '>1. 章节</h2>' in article['content']
+    assert (
+        '<h2 style="font-size:20px;font-weight:700;line-height:1.6;margin:24px 0 12px">'
+        '1. 章节</h2>'
+    ) in article['content']
     assert '<strong>粗体</strong>和<a href="https://example.com">链接</a>' in article['content']
     assert '<table>' in article['content'] and '<td>中文</td>' in article['content']
-    assert 'style=' not in article['content']
     assert '&lt;script&gt;' in article['content'] and '<script>' not in article['content']
     assert 'https://mmbiz.qpic.cn/body.png' in article['content']
     assert updated['persisted_document'].provider_binding['document_id'] == 'draft-media'
