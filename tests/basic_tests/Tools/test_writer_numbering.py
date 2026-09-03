@@ -42,13 +42,18 @@ def test_markdown_style_restart_and_unordered_heading_round_trip():
         '## Delta',
         '<a id="block-e"></a>',
         '## Epsilon',
+        '<a id="block-figure"></a>',
+        '![流程概览](https://example.com/flow.png)',
+        '参见[流程图](#block-figure)。',
     ])
     numbering = _numbering(source)
 
+    assert set(numbering) == set('abcde')
     assert [format_target_number(numbering[node_id]) for node_id in 'abcde'] == [
         '一、', '（一）', '（一）', '', '二、',
     ]
     materialized = _materialize(source)
+    assert '![流程概览](https://example.com/flow.png)' in materialized
     assert '### （一） Gamma' in materialized
     assert '## Delta' in materialized
     assert dematerialize_markdown(materialized, numbering) == source

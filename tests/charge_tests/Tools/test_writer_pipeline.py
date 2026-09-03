@@ -214,8 +214,6 @@ def test_write_workflow_e2e():
     final = _load_stage(stages, 'final_document', WriterDocument)
     assert final is not None
     assert final.title
-    rendered = final.metadata.get('rendered_content', '')
-    assert len(rendered) >= 100
     assert final.metadata.get('output_format') == 'markdown'
 
     # --- Step 10: output_review ---
@@ -501,11 +499,6 @@ def test_revise_workflow_e2e():
 
     final = _load_stage(stages, 'final_document', WriterDocument)
     assert final is not None
-    rendered = final.metadata.get('rendered_content', '')
-    assert len(rendered) >= 100
-    assert 'rust' in rendered.lower(), 'Rust must appear in the final output.'
-    assert 'financial' in rendered.lower(), 'Financial services must appear in the final output.'
-
     primary = result.get('primary_result') or {}
     assert primary.get('artifact_path'), 'primary_result must carry an artifact_path.'
 

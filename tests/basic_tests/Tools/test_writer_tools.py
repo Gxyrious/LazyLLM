@@ -1595,7 +1595,7 @@ def test_markdown_draft_system_owns_required_image_reference():
     instruction.meta['cross_references'] = [{
         'target': 'IMAGE-1',
         'kind': 'image',
-        'caption': '图 1 关键关系',
+        'caption': '关键关系',
         'required': True,
         'must_create': True,
     }]

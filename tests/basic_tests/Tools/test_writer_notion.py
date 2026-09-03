@@ -559,7 +559,7 @@ class TestNotionProvider:
             'content'] == '1. Before'
         fs.update_page_title.assert_called_once_with(PAGE_ID, 'Safety guide')
 
-    def test_notion_provider_materializes_heading_and_figure_numbers_on_write(
+    def test_notion_provider_numbers_headings_and_preserves_image_captions_on_write(
             self, tmp_path):
         image_path = tmp_path / 'figure.png'
         image_path.write_bytes(b'fake image content')
@@ -627,17 +627,17 @@ class TestNotionProvider:
         assert native[1]['heading_2']['rich_text'][0]['text'][
             'content'] == '1.1. Supplies'
         assert native[2]['image']['caption'][0]['text'][
-            'content'] == '图1 Emergency supplies'
+            'content'] == 'Emergency supplies'
         assert native[3]['heading_1']['rich_text'][0]['text'][
             'content'] == '2. Recovery'
         assert native[4]['image']['caption'][0]['text'][
-            'content'] == '图2 Safety checklist'
+            'content'] == 'Safety checklist'
         # Publishing uses a materialized copy and does not pollute the canonical IR.
         assert document.blocks[0].content == 'Preparation'
         assert document.blocks[0].children[0].children[0].content == (
             'Emergency supplies')
 
-    def test_notion_numbering_sync_updates_supported_blocks_and_skips_table(self):
+    def test_notion_numbering_sync_updates_headings_only(self):
         heading = WriterBlock(
             node_id='heading-1', type='heading', content='台风期间', stage='final',
             numbering={'level': 1}, editable=True,
@@ -658,48 +658,16 @@ class TestNotionProvider:
                 }]},
             }},
         )
-        code = WriterBlock(
-            node_id='code-1', type='code', content='print("safe")', stage='final',
-            editable=True,
-            provider_payload={'raw_block': {
-                'type': 'code',
-                'code': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': 'print("safe")'},
-                    }],
-                    'caption': [],
-                    'language': 'python',
-                },
-            }},
-        )
-        table = WriterBlock(
-            node_id='table-1', type='table', content='Safety table', stage='final',
-            editable=False,
-            provider_payload={'raw_block': {'type': 'table', 'table': {}}},
-        )
         persisted = WriterDocument(
             document_id='writer-doc', stage='final',
-            blocks=[heading, image, code, table])
+            blocks=[heading, image])
         numbered = persisted.model_copy(deep=True)
         numbered.blocks[0].content = '1. 台风期间'
-        numbered.blocks[1].content = '图1 安全示意图'
-        numbered.blocks[2].provider_payload['numbering_caption'] = '代码1'
-        numbered.blocks[3].content = '表1 Safety table'
+        numbered.blocks[1].content = '更新后的图片说明'
 
         hunks = NotionWriterProvider._numbering_sync_hunks(numbered, persisted)
 
-        assert [hunk.hunk_id for hunk in hunks] == [
-            'heading-numbering-sync-heading-1',
-            'image-numbering-sync-image-1',
-            'code-numbering-sync-code-1',
-        ]
-        assert hunks[1].meta == {
-            'source': 'system_numbering', 'update_scope': 'caption',
-        }
-        assert hunks[2].meta == {
-            'source': 'system_numbering', 'update_scope': 'caption',
-        }
+        assert [hunk.hunk_id for hunk in hunks] == ['heading-numbering-sync-heading-1']
 
     def test_notion_provider_creates_private_workspace_page_without_parent(self):
         fs = _make_fs()
