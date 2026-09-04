@@ -2,7 +2,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from lazyllm.tools.writer.adapter.wechat import WeChatWriterAdapter
 from lazyllm.tools.writer.data_models.multimodal import MediaAsset, MediaAssetLibrary
@@ -112,7 +112,11 @@ def test_wechat_draft_create_then_update(monkeypatch, tmp_path: Path):
     assert calls['cover'][1].startswith(b'\x89PNG')
     with Image.open(BytesIO(calls['cover'][1])) as cover:
         assert cover.size == (900, 383)
-        assert cover.convert('RGB').getextrema() == ((255, 255),) * 3
+        background = Image.new('RGB', cover.size, 'white')
+        text_bounds = ImageChops.difference(cover.convert('RGB'), background).getbbox()
+        assert text_bounds is not None
+        center = ((text_bounds[0] + text_bounds[2]) / 2, (text_bounds[1] + text_bounds[3]) / 2)
+        assert center == (450, 191.5)
     assert calls['created']['content'] == '<p>初稿正文</p>'
     persisted = created['persisted_document']
     assert persisted.provider_binding['document_id'] == 'draft-media'

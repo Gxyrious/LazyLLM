@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -31,14 +32,100 @@ _ARTICLE_FIELDS = {
 }
 
 
-def _white_cover_png() -> bytes:
-    from io import BytesIO
+def wechat_placeholder_cover_png() -> bytes:
+    return files(__package__).joinpath(
+        'assets/wechat-placeholder-cover.png',
+    ).read_bytes()
 
-    from PIL import Image
 
-    buffer = BytesIO()
-    Image.new('RGB', (900, 383), 'white').save(buffer, format='PNG')
-    return buffer.getvalue()
+_WECHAT_COVER_SIZE = (900, 383)
+_WECHAT_DRAFT_REVISION_TERMS = ('微信', '公众号', '草稿箱')
+_WECHAT_REVISION_INTENT_TERMS = (
+    '修改', '改写', '重写', '润色', '编辑', '修订', '优化',
+    '删除', '删掉', '移除', '替换', '更换', '调整',
+    '扩写', '续写', '新增', '添加', '插入', '合并', '重排', '增强',
+)
+
+
+def is_wechat_draft_revision_request(user_input: str) -> bool:
+    """Return whether a request explicitly targets a WeChat draft revision."""
+    request = str(user_input or '')
+    return (
+        all(term in request for term in _WECHAT_DRAFT_REVISION_TERMS)
+        and any(term in request for term in _WECHAT_REVISION_INTENT_TERMS)
+    )
+
+
+def _document_text(document: WriterDocument) -> str:
+    return '\n'.join(
+        block.content
+        for block in document.iter_blocks()
+        if block.content
+    )
+
+
+def prepare_wechat_cover(
+    target: TargetDocument,
+    document: WriterDocument | str,
+    root: Path,
+    *,
+    model_available: Callable[[str], bool] | None = None,
+    generator: Callable[..., dict[str, Any]] | None = None,
+) -> TargetDocument:
+    """Prepare a WeChat cover for a new article target.
+
+    Image generation is injected by the host application so this provider remains
+    independent of application-layer model tooling.
+    """
+    if (
+        target.adapter != 'wechat'
+        or target.doc_id
+        or target.meta.get('thumb_media_id')
+    ):
+        return target
+    if isinstance(document, WriterDocument):
+        binding = document.provider_binding
+        if binding.get('provider') == 'wechat' and binding.get('document_id'):
+            return target
+        title = document.title or target.title or '未命名文档'
+        body = _document_text(document)
+    else:
+        title = target.title or '未命名文档'
+        body = str(document)
+
+    from PIL import Image, ImageOps
+
+    cover_path = root / 'wechat-cover.png'
+    try:
+        if model_available is not None and not model_available('image_generator'):
+            raise RuntimeError('image_generator is not configured')
+        if generator is None:
+            raise RuntimeError('WeChat cover generation service is not configured')
+        result = generator(
+            '为微信公众号文章生成一张专业、简洁、无文字、无水印的横版封面图。\n'
+            f'文章标题：{title}\n文章内容摘要：{body[:1000]}',
+            image_size='1024x1024',
+            batch_size=1,
+        )
+        generated_path = Path(str(result.get('local_path') or ''))
+        if not generated_path.is_file():
+            raise ValueError('image_generator returned no usable local image')
+        with Image.open(generated_path) as source:
+            cover = ImageOps.fit(
+                source.convert('RGB'),
+                _WECHAT_COVER_SIZE,
+                method=Image.Resampling.LANCZOS,
+            )
+            cover.save(cover_path, format='PNG')
+    except Exception as exc:  # noqa: BLE001 - a valid cover is still required.
+        lazyllm.LOG.warning(
+            'WeChat cover generation failed; using placeholder cover: %s', exc,
+        )
+        cover_path.write_bytes(wechat_placeholder_cover_png())
+
+    prepared = target.model_copy(deep=True)
+    prepared.meta['cover_path'] = str(cover_path)
+    return prepared
 
 
 class WeChatClient:
@@ -344,12 +431,12 @@ class WeChatWriterProvider(WriterProviderBase):
                         thumb_media_id = client.upload_cover_file(Path(cover_path))
                     except (OSError, ValueError) as exc:
                         lazyllm.LOG.warning(
-                            'Cannot use WeChat cover %r; using a white cover: %s',
+                            'Cannot use WeChat cover %r; using the placeholder cover: %s',
                             cover_path, exc,
                         )
                 if not thumb_media_id:
                     thumb_media_id = client.upload_cover(
-                        'lazymind-cover.png', _white_cover_png(), 'image/png')
+                        'lazymind-cover.png', wechat_placeholder_cover_png(), 'image/png')
 
         html = WeChatWriterAdapter().document_to_html(document, image_urls)
         if len(html) > 20_000 or len(html.encode('utf-8')) > 1024 * 1024:
@@ -501,7 +588,22 @@ class WeChatWriterProvider(WriterProviderBase):
             seen.add(asset_id)
             yield asset_id, path
 
+
+def resolve_wechat_draft_target(
+    user_input: str,
+    *,
+    stage: WriterStage = 'final',
+) -> TargetDocument | None:
+    """Resolve a WeChat draft title when the request explicitly asks for one."""
+    if not is_wechat_draft_revision_request(user_input):
+        return None
+    return WeChatWriterProvider().resolve_from_prompt(user_input, stage=stage)
+
+
 __all__ = [
     'WeChatClient',
     'WeChatWriterProvider',
+    'is_wechat_draft_revision_request',
+    'prepare_wechat_cover',
+    'resolve_wechat_draft_target',
 ]
