@@ -14,7 +14,7 @@ import lazyllm
 from ..adapter.wechat import WeChatWriterAdapter
 from ..data_models.multimodal import MediaAssetLibrary
 from ..data_models.revision import PatchSet
-from ..data_models.task import TargetDocument
+from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
 from ..tools.revision_tools import apply_patch_to_ir
 from ..utils import parse_document_markdown
@@ -361,6 +361,38 @@ class WeChatWriterProvider(WriterProviderBase):
             title=title.strip(),
             meta={'browser_url': _MP_HOME},
         )
+
+    def document_image_resources(
+        self,
+        document: WriterDocument,
+    ) -> tuple[list[InputResource], list[str]]:
+        resources: list[InputResource] = []
+        warnings: list[str] = []
+        for block in (item for item in document.iter_blocks() if item.type == 'image'):
+            reference = next((
+                ref for ref in block.references
+                if ref.get('type') == 'wechat_image'
+                and str(ref.get('url') or '').strip()
+            ), None)
+            url = str(reference.get('url') or '').strip() if reference else ''
+            if not url:
+                warnings.append(f'WeChat image block {block.node_id!r} has no image URL.')
+                continue
+            resources.append(InputResource(
+                resource_id=f'wechat-image-{block.node_id}',
+                resource_type='image',
+                uri=url,
+                title=block.content or f'WeChat image {block.node_id}',
+                summary=block.content or None,
+                meta={
+                    'provider': self.provider,
+                    'provider_block_id': block.node_id,
+                    'source_type': 'input_resource',
+                    'origin': 'source_document',
+                    'caption': block.content or None,
+                },
+            ))
+        return resources, warnings
 
     def replace_document(
         self,

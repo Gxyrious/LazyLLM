@@ -354,105 +354,29 @@ class WriterMultimodalTools(WriterToolBase):
         self,
         document: WriterDocument,
     ) -> tuple[List[tuple[InputResource, MediaAsset]], List[str]]:
-        provider = str(document.provider_binding.get('provider') or '').lower()
-        image_blocks = [block for block in document.iter_blocks() if block.type == 'image']
-        if not image_blocks or provider not in {'feishu', 'wechat'}:
+        provider_key = str(document.provider_binding.get('provider') or '').lower()
+        if not provider_key or not any(block.type == 'image' for block in document.iter_blocks()):
             return [], []
-
-        if provider == 'wechat':
-            return self._materialize_wechat_document_images(document)
-
-        locator = str(
-            document.provider_binding.get('uri')
-            or ((document.metadata.get('source') or {}).get('uri') if isinstance(
-                document.metadata.get('source'), dict) else '')
-            or f'feishu:/~docx/{document.provider_binding.get("document_id") or ""}'
-        ).strip()
-        import lazyllm.tools.fs.client as _fs_client
-        protocol, space_id, real_path = _fs_client.FS._parse(locator)
-        fs = _fs_client.FS._get_or_create_fs(protocol, space_id, real_path)
-        download_media = getattr(fs, 'download_media', None)
-        if not callable(download_media):
-            return [], [f'{type(fs).__name__} does not support Feishu media downloads.']
-
+        from ..provider import get_writer_provider
+        try:
+            provider = get_writer_provider(provider_key, adapters=self.adapters)
+        except ValueError:
+            return [], []
+        resources, warnings = provider.document_image_resources(document)
         collected: List[tuple[InputResource, MediaAsset]] = []
-        warnings: List[str] = []
-        for block in image_blocks:
-            raw = block.provider_payload.get('raw_block') or {}
-            image = raw.get('image') if isinstance(raw, dict) else None
-            token = str((image or {}).get('token') or '').strip()
-            block_id = str(block.provider_binding.get('block_id') or block.node_id)
-            if not token:
-                warnings.append(f'Feishu image block {block_id!r} has no media token.')
-                continue
-            resource = InputResource(
-                resource_id=f'feishu-image-{block_id}',
-                resource_type='image',
-                uri=f'{locator}#image={block_id}',
-                title=block.content or f'Feishu image {block_id}',
-                summary=block.content or None,
-                meta={
-                    'provider': 'feishu',
-                    'provider_block_id': block_id,
-                    'source_type': 'input_resource',
-                    'origin': 'source_document',
-                    'caption': block.content or None,
-                },
-            )
+        provider_name = type(provider).__name__.removesuffix('WriterProvider')
+        for resource in resources:
             try:
-                asset = self._materialize_image_bytes(download_media(token), resource)
-                collected.append((resource, asset))
-            except Exception as exc:
-                warnings.append(
-                    f'Failed to download Feishu image {block_id!r}: '
-                    f'{type(exc).__name__}: {exc}'
-                )
-        return collected, warnings
-
-    def _materialize_wechat_document_images(
-        self,
-        document: WriterDocument,
-    ) -> tuple[List[tuple[InputResource, MediaAsset]], List[str]]:
-        """Download WeChat draft images so rewritten documents can reuse them."""
-        collected: List[tuple[InputResource, MediaAsset]] = []
-        warnings: List[str] = []
-        for block in (item for item in document.iter_blocks() if item.type == 'image'):
-            reference = next(
-                (
-                    ref for ref in block.references
-                    if ref.get('type') == 'wechat_image'
-                    and str(ref.get('url') or '').strip()
-                ),
-                None,
-            )
-            url = str(reference.get('url') or '').strip() if reference else ''
-            if not url:
-                warnings.append(f'WeChat image block {block.node_id!r} has no image URL.')
-                continue
-            resource = InputResource(
-                resource_id=f'wechat-image-{block.node_id}',
-                resource_type='image',
-                uri=url,
-                title=block.content or f'WeChat image {block.node_id}',
-                summary=block.content or None,
-                meta={
-                    'provider': 'wechat',
-                    'provider_block_id': block.node_id,
-                    'source_type': 'input_resource',
-                    'origin': 'source_document',
-                    'caption': block.content or None,
-                },
-            )
-            try:
-                asset = self._materialize_image_bytes(
-                    self._download_external_image(url),
-                    resource,
-                    suffix_hint=Path(urlparse(url).path).suffix,
+                data = provider.download_document_image(document, resource)
+                asset = (
+                    self._materialize_image_bytes(data, resource)
+                    if data is not None else self._materialize_input_resource(resource)
                 )
                 collected.append((resource, asset))
             except Exception as exc:
+                block_id = resource.meta.get('provider_block_id') or resource.resource_id
                 warnings.append(
-                    f'Failed to download WeChat image {block.node_id!r}: '
+                    f'Failed to download {provider_name} image {block_id!r}: '
                     f'{type(exc).__name__}: {exc}'
                 )
         return collected, warnings

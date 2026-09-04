@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 from ..data_models.multimodal import MediaAssetLibrary
 from ..data_models.revision import PatchSet
-from ..data_models.task import TargetDocument
+from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
 
 
@@ -41,6 +41,20 @@ class WriterProviderBase(ABC):
         '''Create an empty provider document.'''
         raise NotImplementedError(
             f'{self.provider or type(self).__name__} does not support create_document().')
+
+    def document_image_resources(
+        self,
+        document: WriterDocument,
+    ) -> tuple[list[InputResource], list[str]]:
+        return [], []
+
+    def download_document_image(
+        self,
+        document: WriterDocument,
+        resource: InputResource,
+    ) -> bytes | None:
+        # None delegates ordinary file/HTTP resources to the shared materializer.
+        return None
 
     @abstractmethod
     def replace_document(
