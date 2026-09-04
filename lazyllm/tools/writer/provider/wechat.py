@@ -63,11 +63,11 @@ def prepare_wechat_cover(
     model_available: Callable[[str], bool] | None = None,
     generator: Callable[..., dict[str, Any]] | None = None,
 ) -> TargetDocument:
-    """Prepare a WeChat cover for a new article target.
+    '''Prepare a WeChat cover for a new article target.
 
     Image generation is injected by the host application so this provider remains
     independent of application-layer model tooling.
-    """
+    '''
     if (
         target.adapter != 'wechat'
         or target.doc_id
@@ -120,6 +120,8 @@ def prepare_wechat_cover(
 
 
 class WeChatClient:
+    '''Call the WeChat Official Account draft and media APIs.'''
+
     api_base = 'https://api.weixin.qq.com/cgi-bin'
 
     def __init__(self, access_token: str, *, timeout: float = 20.0):
@@ -130,6 +132,7 @@ class WeChatClient:
         self.timeout = timeout
 
     def add_draft(self, article: dict[str, Any]) -> str:
+        '''Create a draft containing one article and return its media ID.'''
         payload = self._request_json('POST', '/draft/add', json={'articles': [article]})
         media_id = str(payload.get('media_id') or '').strip()
         if not media_id:
@@ -137,6 +140,7 @@ class WeChatClient:
         return media_id
 
     def update_draft(self, media_id: str, article: dict[str, Any], *, index: int = 0) -> None:
+        '''Replace one article in an existing draft.'''
         if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             raise ValueError('WeChat draft article index must be a non-negative integer.')
         self._request_json('POST', '/draft/update', json={
@@ -146,6 +150,7 @@ class WeChatClient:
         })
 
     def get_draft(self, media_id: str) -> dict[str, Any]:
+        '''Return one draft by media ID.'''
         media_id = str(media_id or '').strip()
         if not media_id:
             raise ValueError('WeChat draft media_id is required.')
@@ -158,6 +163,7 @@ class WeChatClient:
         *,
         no_content: bool = False,
     ) -> dict[str, Any]:
+        '''Return one page of drafts.'''
         if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
             raise ValueError('WeChat draft offset must be a non-negative integer.')
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 20:
@@ -169,6 +175,7 @@ class WeChatClient:
         })
 
     def upload_body_image(self, path: Path) -> str:
+        '''Upload an article body image and return its hosted URL.'''
         data, mime = self._image_file(path, body=True)
         payload = self._request_json(
             'POST', '/media/uploadimg',
@@ -180,6 +187,7 @@ class WeChatClient:
         return url
 
     def upload_cover(self, filename: str, data: bytes, mime: str) -> str:
+        '''Upload permanent cover bytes and return their media ID.'''
         payload = self._request_json(
             'POST', '/material/add_material',
             params={'type': 'image'},
@@ -191,6 +199,7 @@ class WeChatClient:
         return media_id
 
     def upload_cover_file(self, path: Path) -> str:
+        '''Upload a cover image file and return its media ID.'''
         data, mime = self._image_file(path, body=False)
         return self.upload_cover(path.name, data, mime)
 
@@ -272,7 +281,7 @@ class WeChatWriterProvider(WriterProviderBase):
         raise ValueError(_DRAFT_TITLE_NOT_FOUND)
 
     def list_drafts(self, *, page_size: int = 20) -> list[dict[str, Any]]:
-        """Return drafts in WeChat's order, including article titles."""
+        '''Return drafts in WeChat's order, including article titles.'''
         client = WeChatClient(self._access_token())
         offset = 0
         drafts: list[dict[str, Any]] = []

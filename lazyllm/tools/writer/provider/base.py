@@ -46,6 +46,7 @@ class WriterProviderBase(ABC):
         self,
         document: WriterDocument,
     ) -> tuple[list[InputResource], list[str]]:
+        '''Return provider image resources and non-fatal discovery warnings.'''
         return [], []
 
     def download_document_image(
@@ -53,6 +54,7 @@ class WriterProviderBase(ABC):
         document: WriterDocument,
         resource: InputResource,
     ) -> bytes | None:
+        '''Return provider image bytes, or defer ordinary URIs to shared loading.'''
         # None delegates ordinary file/HTTP resources to the shared materializer.
         return None
 

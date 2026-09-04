@@ -276,7 +276,8 @@ def test_wechat_draft_read_patch_write_preserves_untouched_html(monkeypatch):
     source_html = (
         '<p style="color:red"><strong>保留样式</strong>&nbsp;原段落</p>'
         '<section data-component="video-card"><video src="https://video.example/v.mp4"></video></section>'
-        '<section data-component="remote-image"><img src="https://mmbiz.qpic.cn/image.png" style="width:80%;" /></section>'
+        '<section data-component="remote-image">'
+        '<img src="https://mmbiz.qpic.cn/image.png" style="width:80%;" /></section>'
         '<table data-layout="custom"><tr><th>A</th><th>B</th></tr>'
         '<tr><td rowspan="2">1</td><td>2</td></tr><tr><td>3</td></tr></table>'
         '<p>需要修改</p>'
@@ -351,8 +352,14 @@ def test_wechat_draft_read_patch_write_preserves_untouched_html(monkeypatch):
     assert article['need_open_comment'] == 1
     assert article['only_fans_can_comment'] == 1
     assert '<p>修改后的正文</p>' in article['content']
-    assert '<section data-component="video-card"><video src="https://video.example/v.mp4"></video></section>' in article['content']
-    assert '<section data-component="remote-image"><img src="https://mmbiz.qpic.cn/image.png" style="width:80%;" /></section>' in article['content']
+    assert (
+        '<section data-component="video-card">'
+        '<video src="https://video.example/v.mp4"></video></section>'
+    ) in article['content']
+    assert (
+        '<section data-component="remote-image">'
+        '<img src="https://mmbiz.qpic.cn/image.png" style="width:80%;" /></section>'
+    ) in article['content']
     assert '<table data-layout="custom"><tr><th>A</th><th>B</th></tr>' in article['content']
     assert result['persisted_document'].provider_binding['article_index'] == 1
 
@@ -409,7 +416,7 @@ def test_wechat_draft_list_is_paginated(monkeypatch):
         def batch_get_drafts(self, offset, count, *, no_content=False):
             calls.append((offset, count, no_content))
             pages = {
-                0: [{'media_id': 'media-1'} , {'media_id': 'media-2'}],
+                0: [{'media_id': 'media-1'}, {'media_id': 'media-2'}],
                 2: [{'media_id': 'media-3'}],
             }
             return {'total_count': 3, 'item': pages.get(offset, [])}

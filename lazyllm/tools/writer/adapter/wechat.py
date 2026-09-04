@@ -21,7 +21,10 @@ from ..utils import strip_heading_numbering
 from .base import NativeBlock, NativePatchOperation, WriterAdapterBase
 
 _TABLE_MARKDOWN = mistune.create_markdown(escape=True, plugins=['table'])
-_VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+_VOID_TAGS = {
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+    'meta', 'param', 'source', 'track', 'wbr',
+}
 _KNOWN_INLINE_TAGS = {'a', 'b', 'br', 'code', 'del', 'em', 'i', 's', 'span', 'strong', 'sub', 'sup', 'u'}
 _KNOWN_BLOCK_TAGS = {'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'img', 'ol', 'p', 'pre', 'table', 'ul'}
 
@@ -94,7 +97,7 @@ class _HtmlNode:
 
 
 class _WeChatHTMLParser(HTMLParser):
-    """Parse HTML while retaining source offsets for lossless block fragments."""
+    '''Parse HTML while retaining source offsets for lossless block fragments.'''
 
     def __init__(self, source: str) -> None:
         super().__init__(convert_charrefs=False)
@@ -178,7 +181,7 @@ def _html_raw(source: str, node: _HtmlNode) -> str:
 
 
 def _sanitize_css(value: Any) -> str:
-    """Keep a conservative, deterministic subset of source CSS declarations."""
+    '''Keep a conservative, deterministic subset of source CSS declarations.'''
     css = str(value or '').strip()
     if not css:
         return ''
@@ -218,7 +221,7 @@ def _serialize_attrs(
     allowed: frozenset[str],
     overrides: Mapping[str, Any] | None = None,
 ) -> str:
-    """Serialize a small safe attribute subset for regenerated provider HTML."""
+    '''Serialize a small safe attribute subset for regenerated provider HTML.'''
     values = {
         str(key).lower(): str(value or '').strip()
         for key, value in (attrs.items() if isinstance(attrs, Mapping) else [])
@@ -262,7 +265,7 @@ def _descendants(node: _HtmlNode, tag: str) -> Iterable[_HtmlNode]:
         yield from _descendants(child, tag)
 
 
-def _inline_style(node: _HtmlNode) -> dict[str, Any]:
+def _inline_style(node: _HtmlNode) -> dict[str, Any]:  # noqa: C901
     style: dict[str, Any] = {}
     if node.tag in {'b', 'strong'}:
         style['bold'] = True
@@ -296,7 +299,10 @@ def _inline_style(node: _HtmlNode) -> dict[str, Any]:
     return style
 
 
-def _inline_content(node: _HtmlNode, inherited: dict[str, Any] | None = None) -> tuple[str, list[WriterSpan], list[dict[str, Any]]]:
+def _inline_content(
+    node: _HtmlNode,
+    inherited: dict[str, Any] | None = None,
+) -> tuple[str, list[WriterSpan], list[dict[str, Any]]]:
     content = ''
     spans: list[WriterSpan] = []
     references: list[dict[str, Any]] = []
@@ -415,12 +421,13 @@ def _replace_raw_heading_number(
 
 
 class WeChatWriterAdapter(WriterAdapterBase):
-    """Render Writer IR into the conservative HTML subset accepted by MP drafts."""
+    '''Render Writer IR into the conservative HTML subset accepted by MP drafts.'''
 
     provider = 'wechat'
 
     @staticmethod
     def can_reuse_raw(block: WriterBlock) -> bool:
+        '''Return whether a block still matches its original WeChat HTML.'''
         return _raw_if_unchanged(block) is not None
 
     def blocks_to_ir(
@@ -461,6 +468,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
         uri: str | None = None,
         revision: str | None = None,
     ) -> WriterDocument:
+        '''Parse WeChat article HTML into Writer IR.'''
         source = str(html or '')
         parser = _WeChatHTMLParser(source)
         parser.feed(source)
@@ -517,7 +525,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
             ))
         return blocks
 
-    def _parse_block(
+    def _parse_block(  # noqa: C901
         self,
         node: _HtmlNode,
         source: str,
@@ -755,6 +763,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
         document: WriterDocument,
         image_urls: dict[str, str] | None = None,
     ) -> str:
+        '''Render Writer IR as WeChat draft HTML.'''
         source = document.metadata.get('wechat_html_source')
         source_snapshot = document.metadata.get('wechat_html_snapshot')
         if isinstance(source, str) and source_snapshot == _document_snapshot(document):
@@ -813,7 +822,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
             index += 1
         return rendered
 
-    def _render_block(
+    def _render_block(  # noqa: C901
         self,
         block: WriterBlock,
         images: dict[str, str],
@@ -966,7 +975,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
         url = str(value or '').strip()
         return url if urlsplit(url).scheme.lower() in {'http', 'https', 'mailto'} else ''
 
-    def _render_inline(self, block: WriterBlock) -> str:
+    def _render_inline(self, block: WriterBlock) -> str:  # noqa: C901
         content = block.content or ''
         spans = block.spans if ''.join(span.text for span in block.spans) == content else []
         boundaries = {0, len(content)}
