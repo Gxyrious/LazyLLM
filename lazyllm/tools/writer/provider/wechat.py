@@ -47,15 +47,6 @@ _WECHAT_REVISION_INTENT_TERMS = (
 )
 
 
-def is_wechat_draft_revision_request(user_input: str) -> bool:
-    """Return whether a request explicitly targets a WeChat draft revision."""
-    request = str(user_input or '')
-    return (
-        all(term in request for term in _WECHAT_DRAFT_REVISION_TERMS)
-        and any(term in request for term in _WECHAT_REVISION_INTENT_TERMS)
-    )
-
-
 def _document_text(document: WriterDocument) -> str:
     return '\n'.join(
         block.content
@@ -252,22 +243,16 @@ class WeChatWriterProvider(WriterProviderBase):
 
     @classmethod
     def matches(cls, locator: str) -> bool:
-        return False
-
-    def resolve(self, locator: str) -> TargetDocument:
-        raise ValueError(
-            'WeChat drafts are resolved by article title from the user request, '
-            'not by a document locator.'
+        request = str(locator or '')
+        return (
+            all(term in request for term in _WECHAT_DRAFT_REVISION_TERMS)
+            and any(term in request for term in _WECHAT_REVISION_INTENT_TERMS)
         )
 
-    def resolve_from_prompt(
-        self,
-        user_input: str,
-        *,
-        stage: WriterStage = 'final',
-    ) -> TargetDocument:
-        """Resolve the first draft article whose full title is in the request."""
-        request = str(user_input or '')
+    def resolve(self, locator: str) -> TargetDocument:
+        request = str(locator or '')
+        if not self.matches(request):
+            raise ValueError(f'Invalid WeChat draft request: {locator!r}.')
         for draft in self.list_drafts():
             media_id = str(draft.get('media_id') or '').strip()
             if not media_id:
@@ -282,7 +267,6 @@ class WeChatWriterProvider(WriterProviderBase):
                         meta={
                             'article_index': article_index,
                             'browser_url': _MP_HOME,
-                            'stage': stage,
                         },
                     )
         raise ValueError(_DRAFT_TITLE_NOT_FOUND)
@@ -589,21 +573,8 @@ class WeChatWriterProvider(WriterProviderBase):
             yield asset_id, path
 
 
-def resolve_wechat_draft_target(
-    user_input: str,
-    *,
-    stage: WriterStage = 'final',
-) -> TargetDocument | None:
-    """Resolve a WeChat draft title when the request explicitly asks for one."""
-    if not is_wechat_draft_revision_request(user_input):
-        return None
-    return WeChatWriterProvider().resolve_from_prompt(user_input, stage=stage)
-
-
 __all__ = [
     'WeChatClient',
     'WeChatWriterProvider',
-    'is_wechat_draft_revision_request',
     'prepare_wechat_cover',
-    'resolve_wechat_draft_target',
 ]

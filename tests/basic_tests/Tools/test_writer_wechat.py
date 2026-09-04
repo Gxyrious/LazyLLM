@@ -17,6 +17,7 @@ from lazyllm.tools.writer.provider.wechat import (
     WeChatClient,
     WeChatWriterProvider,
 )
+from lazyllm.tools.writer.provider import match_writer_provider
 from lazyllm.tools.writer.tools.resource_tools import WriterResourceTools
 from lazyllm.tools.writer.utils.artifact import deserialize_artifact_json
 
@@ -27,6 +28,31 @@ def _patch_wechat_client(monkeypatch, client):
         WeChatWriterProvider,
         '_access_token',
         staticmethod(lambda: 'stable-token'),
+    )
+
+
+def test_wechat_provider_matches_and_resolves_prompt(monkeypatch):
+    request = '请修改微信公众号草稿箱中的《目标文章》'
+    monkeypatch.setattr(
+        WeChatWriterProvider,
+        'list_drafts',
+        lambda self: [{
+            'media_id': 'draft-1',
+            'content': {'news_item': [{'title': '目标文章'}]},
+        }],
+    )
+
+    provider = match_writer_provider(request)
+
+    assert isinstance(provider, WeChatWriterProvider)
+    assert provider.resolve(request) == TargetDocument(
+        doc_id='draft-1',
+        adapter='wechat',
+        title='目标文章',
+        meta={
+            'article_index': 0,
+            'browser_url': 'https://mp.weixin.qq.com/',
+        },
     )
 
 
