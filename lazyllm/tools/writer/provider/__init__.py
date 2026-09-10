@@ -13,6 +13,7 @@ from .feishu import FeishuWriterProvider
 from .github import GitHubWriterProvider
 from .notion import NotionWriterProvider
 from .wechat import WeChatWriterProvider
+from .obsidian import ObsidianWriterProvider
 from .registry import (
     get_writer_provider,
     list_writer_providers,
@@ -26,6 +27,7 @@ register_writer_provider(FeishuWriterProvider)
 register_writer_provider(GitHubWriterProvider)
 register_writer_provider(NotionWriterProvider)
 register_writer_provider(WeChatWriterProvider)
+register_writer_provider(ObsidianWriterProvider)
 
 
 __all__ = [
@@ -33,6 +35,7 @@ __all__ = [
     'GitHubWriterProvider',
     'NotionWriterProvider',
     'WeChatWriterProvider',
+    'ObsidianWriterProvider',
     'WriterProviderBase',
     'WriterProviderCapabilities',
     'WriterProviderCapability',
