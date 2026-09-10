@@ -209,14 +209,16 @@ def test_obsidian_ir_write_back_serializes_media_asset_path():
 
 
 def test_write_result_preserves_provider_fields(tmp_path):
-    result = WriterResourceTools(llm=None, artifact_store=str(tmp_path))._save_write_result({
-        'doc_id': 'vault:note.md',
-        'adapter': 'obsidian',
-        'locator': 'obsidian://vault/note.md',
-        'block_count': 3,
-        'local_path': '/Users/example/Documents/vault/note.md',
-        'warnings': ['source changed'],
-    })
+    result = WriterResourceTools(llm=None, artifact_store=str(tmp_path))._save_write_result(
+        document_id='vault:note.md',
+        adapter='obsidian',
+        locator='obsidian://vault/note.md',
+        block_count=3,
+        provider_result={
+            'local_path': '/Users/example/Documents/vault/note.md',
+            'warnings': ['source changed'],
+        },
+    )
 
     write_result = load_artifact_json(result['artifact_path'], validate_schema=False)
 
