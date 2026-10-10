@@ -64,6 +64,7 @@ from ..utils import (
     validate_writer_tables,
 )
 from ..utils.serialization import markdown_image_sources, markdown_section_range
+from ..utils.image_groups import ImageGroup
 
 
 def apply_patch_to_ir(
@@ -76,12 +77,17 @@ def apply_patch_to_ir(
     validate_writer_tables(document)
     tools._validate_patch(document, patch_set, media_assets=media_assets)
     if not patch_set.hunks \
-            and (patch_set.new_title is None or patch_set.new_title == document.title):
+            and (patch_set.new_title is None or patch_set.new_title == document.title) \
+            and patch_set.image_groups is None:
         raise ValueError('patch contains no document operations.')
     revised_doc = document.model_copy(deep=True)
     revised_doc.ui_editable = False
     if patch_set.new_title is not None:
         revised_doc.title = patch_set.new_title
+    if patch_set.image_groups is not None:
+        revised_doc.metadata['image_groups'] = [
+            ImageGroup.model_validate(group).model_dump() for group in patch_set.image_groups
+        ]
 
     applied: List[str] = []
     for hunk in patch_set.hunks:
@@ -1271,9 +1277,11 @@ locator kind per reference. Return valid JSON only.
             target_doc_id=source.document_id,
             new_title=revised.title if source.title != revised.title else None,
             hunks=hunks,
+            image_groups=revised.metadata.get('image_groups', [])
+            if source.metadata.get('image_groups', []) != revised.metadata.get('image_groups', []) else None,
             meta={'source': 'document_diff'},
         )
-        if patch.hunks or patch.new_title is not None:
+        if patch.hunks or patch.new_title is not None or patch.image_groups is not None:
             applied, _ = apply_patch_to_ir(source, patch, media_assets=media_assets)
             self._assert_revision_applied(applied, revised)
         else:
@@ -1373,6 +1381,7 @@ locator kind per reference. Return valid JSON only.
             'stage': document.stage,
             'title': document.title,
             'blocks': [cls._visible_block(block) for block in document.blocks],
+            'image_groups': document.metadata.get('image_groups', []),
         }
 
     @classmethod

@@ -17,6 +17,7 @@ from ..numbering import (
 )
 from ..templates.wechat import WeChatTemplate, get_wechat_template
 from ..utils import strip_heading_numbering, validate_writer_tables
+from ..utils.image_groups import sliding_image_groups, image_group_references
 from .base import NativeBlock, NativePatchOperation, WriterAdapterBase
 
 _VOID_TAGS = {
@@ -34,7 +35,7 @@ _WECHAT_SAFE_CSS_PROPERTIES = frozenset({
     'max-width', 'min-height', 'min-width', 'object-fit', 'opacity', 'padding',
     'padding-bottom', 'padding-left', 'padding-right', 'padding-top', 'text-align',
     'text-decoration', 'text-indent', 'vertical-align', 'white-space', 'width',
-    'height', 'word-break',
+    'height', 'word-break', 'overflow', 'overflow-x', 'overflow-y',
 })
 
 _WECHAT_TABLE_STYLE = {
@@ -339,8 +340,9 @@ def _source_snapshot(block: WriterBlock) -> dict[str, Any]:
     }
 
 
-def _document_snapshot(document: WriterDocument) -> list[dict[str, Any]]:
-    return [_source_snapshot(block) for block in document.blocks]
+def _document_snapshot(document: WriterDocument) -> dict[str, Any]:
+    return {'blocks': [_source_snapshot(block) for block in document.blocks],
+            'image_groups': deepcopy(document.metadata.get('image_groups', []))}
 
 
 def _heading_style_map(blocks: Iterable[WriterBlock]) -> dict[str, str]:
@@ -460,12 +462,14 @@ class WeChatWriterAdapter(WriterAdapterBase):
         parser = _WeChatHTMLParser(source)
         parser.feed(source)
         parser.close()
+        parsed_galleries: list[list[str]] = []
         blocks = self._parse_root_blocks(
             parser.root.children,
             source,
             external_document_id,
             stage,
             path=(),
+            parsed_galleries=parsed_galleries,
         )
         binding: dict[str, Any] = {
             'provider': self.provider,
@@ -491,6 +495,12 @@ class WeChatWriterAdapter(WriterAdapterBase):
             ui_editable=False,
         )
         validate_writer_tables(document)
+        if parsed_galleries:
+            references = image_group_references(document)
+            document.metadata['image_groups'] = [
+                {'images': [references[node_id] for node_id in members], 'layout': 'sliding'}
+                for members in parsed_galleries
+            ]
         document.metadata['wechat_html_snapshot'] = _document_snapshot(document)
         return document
 
@@ -502,10 +512,34 @@ class WeChatWriterAdapter(WriterAdapterBase):
         stage: WriterStage,
         *,
         path: tuple[int, ...],
+        parsed_galleries: list[list[str]] | None = None,
     ) -> list[WriterBlock]:
         blocks: list[WriterBlock] = []
         for index, node in enumerate(nodes):
             if node.tag == '#text' and not node.text.strip():
+                continue
+            children = _element_children(node)
+            style = _style_text(node.attrs.get('style', '')).replace(' ', '').lower()
+            if node.tag in {'section', 'div'} and 'overflow-x:auto' in style and 'white-space:nowrap' in style \
+                    and len(children) >= 2 and all(len(list(_descendants(child, 'img'))) == 1 for child in children):
+                members = [self._parse_block(
+                    _element_children(child)[0] if len(_element_children(child)) == 1 else child,
+                    source, external_document_id, stage, path=(*path, index, slide),
+                ) for slide, child in enumerate(children)]
+                if any(member.type != 'image' for member in members):
+                    raise ValueError('Sliding image group contains unsupported content.')
+                blocks.extend(members)
+                if parsed_galleries is not None:
+                    parsed_galleries.append([member.node_id for member in members])
+                continue
+            if node.tag in {'section', 'div', 'article'} and any(
+                'overflow-x:auto' in _style_text(descendant.attrs.get('style', '')).replace(' ', '').lower()
+                for descendant in _descendants(node, 'section')
+            ):
+                blocks.extend(self._parse_root_blocks(
+                    node.children, source, external_document_id, stage,
+                    path=(*path, index), parsed_galleries=parsed_galleries,
+                ))
                 continue
             blocks.append(self._parse_block(
                 node, source, external_document_id, stage,
@@ -740,6 +774,8 @@ class WeChatWriterAdapter(WriterAdapterBase):
             return node.tag, node
         if node.tag in {'section', 'div', 'article', 'figure'}:
             children = _element_children(node)
+            if len(children) == 1 and children[0].tag in {'section', 'div', 'article', 'figure'}:
+                return WeChatWriterAdapter._semantic_node(children[0])
             if len(children) == 1 and children[0].tag in _KNOWN_BLOCK_TAGS:
                 return children[0].tag, children[0]
             if len(children) == 2 and children[0].tag == 'img' and children[1].tag in {'p', 'figcaption'}:
@@ -800,9 +836,13 @@ class WeChatWriterAdapter(WriterAdapterBase):
             caption_style = _caption_style(document.blocks)
         if not caption_style:
             caption_style = _style_text(selected_template.caption_style())
+        galleries = sliding_image_groups(document)
+        if isinstance(source_snapshot, dict) and source_snapshot.get('image_groups', []) != document.metadata.get('image_groups', []):
+            galleries['__rebuild__'] = [block.node_id for block in document.iter_blocks()
+                                        if any(child.type == 'image' for child in block.iter_blocks())]
         body = ''.join(self._render_sequence(
             document.blocks, images, numbering, heading_styles, caption_style,
-            selected_template, preserve_source,
+            selected_template, preserve_source, galleries,
         ))
         if preserve_source:
             return body
@@ -819,11 +859,25 @@ class WeChatWriterAdapter(WriterAdapterBase):
         caption_style: str,
         template: WeChatTemplate,
         preserve_source: bool,
+        galleries: dict[str, list[str]] | None = None,
     ) -> list[str]:
         rendered: list[str] = []
         index = 0
         while index < len(blocks):
             block = blocks[index]
+            members = (galleries or {}).get(block.node_id)
+            if members:
+                slides = [self._render_block(
+                    item, images, numbering, heading_styles, caption_style, template, preserve_source,
+                    galleries,
+                ) for item in blocks[index:index + len(members)]]
+                rendered.append(
+                    '<section style="overflow-x:auto;overflow-y:hidden;white-space:nowrap;width:100%;font-size:0">'
+                    + ''.join('<section style="display:inline-block;vertical-align:top;width:100%;white-space:normal;font-size:16px">'
+                              + slide + '</section>' for slide in slides) + '</section>'
+                )
+                index += len(members)
+                continue
             if block.type == 'list_item':
                 ordered = bool(block.numbering.get('ordered'))
                 items: list[WriterBlock] = []
@@ -835,12 +889,12 @@ class WeChatWriterAdapter(WriterAdapterBase):
                     index += 1
                 rendered.append(self._render_list_items(
                     items, ordered, images, numbering, heading_styles, caption_style,
-                    template, preserve_source,
+                    template, preserve_source, galleries,
                 ))
                 continue
             rendered.append(self._render_block(
                 block, images, numbering, heading_styles, caption_style, template,
-                preserve_source,
+                preserve_source, galleries,
             ))
             index += 1
         return rendered
@@ -854,10 +908,15 @@ class WeChatWriterAdapter(WriterAdapterBase):
         caption_style: str,
         template: WeChatTemplate,
         preserve_source: bool,
+        galleries: dict[str, list[str]] | None = None,
     ) -> str:
         entry = numbering.get(block.node_id)
         label = format_target_number(entry) if entry is not None else ''
         raw = _raw_if_unchanged(block)
+        if galleries and (block.node_id in galleries.get('__rebuild__', []) or any(
+            descendant.node_id in galleries for descendant in block.iter_blocks()
+        )):
+            raw = None
         if raw is not None and (preserve_source or block.type == 'wechat_opaque'):
             if block.type != 'heading':
                 return raw
@@ -874,12 +933,12 @@ class WeChatWriterAdapter(WriterAdapterBase):
         if block.type == 'wechat_list':
             return self._render_list(
                 block, images, numbering, heading_styles, caption_style, template,
-                preserve_source,
+                preserve_source, galleries,
             )
         body = self._render_inline(block)
         children = '' if block.type == 'table' else ''.join(self._render_sequence(
             block.children, images, numbering, heading_styles, caption_style, template,
-            preserve_source,
+            preserve_source, galleries,
         ))
         if block.type == 'heading':
             level = int(block.numbering.get('level') or 1)
@@ -1005,10 +1064,11 @@ class WeChatWriterAdapter(WriterAdapterBase):
         caption_style: str,
         template: WeChatTemplate,
         preserve_source: bool,
+        galleries: dict[str, list[str]] | None = None,
     ) -> str:
         return self._render_list_items(
             block.children, bool(block.numbering.get('ordered')), images, numbering,
-            heading_styles, caption_style, template, preserve_source,
+            heading_styles, caption_style, template, preserve_source, galleries,
         )
 
     def _render_list_items(
@@ -1021,6 +1081,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
         caption_style: str,
         template: WeChatTemplate,
         preserve_source: bool,
+        galleries: dict[str, list[str]] | None = None,
     ) -> str:
         list_style = _style_text(template.list_style())
         item_style = _style_text(template.list_item_style())
@@ -1038,7 +1099,7 @@ class WeChatWriterAdapter(WriterAdapterBase):
             )) if ordered else '&#8203;'
             children = ''.join(self._render_sequence(
                 item.children, images, numbering, heading_styles, caption_style, template,
-                preserve_source,
+                preserve_source, galleries,
             ))
             rendered.append(
                 f'<p{item_attr}><span{marker_attr}>{marker}</span>'

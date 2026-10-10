@@ -29,6 +29,7 @@ dependencies = [
     "tqdm",
     "filelock",
     "pyyaml",
+    "python-frontmatter>=1.1.0,<2.0.0",
     "packaging",
     "fastapi >=0.111.0",
     "loguru >=0.7.2",

@@ -29,6 +29,7 @@ package_name_map = {
     'ahocorasick': 'pyahocorasick',
     'psycopg2': 'psycopg2-binary',
     'yaml': 'pyyaml',
+    'frontmatter': 'python-frontmatter',
     'opentelemetry': 'opentelemetry-api',
     'opentelemetry.sdk': 'opentelemetry-sdk',
     'opentelemetry.exporter': 'opentelemetry-exporter-otlp-proto-http',
